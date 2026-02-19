@@ -28,7 +28,7 @@ function isIgnorableGeminiStderr(line) {
 
 async function spawnGemini(command, options = {}, ws) {
   return new Promise(async (resolve, reject) => {
-    const { sessionId, projectPath, cwd, resume, toolsSettings, skipPermissions, model, images } = options;
+    const { sessionId, projectPath, cwd, resume, toolsSettings, skipPermissions, model, images, permissionMode } = options;
     let capturedSessionId = sessionId; // Track session ID throughout the process
     let sessionCreatedSent = false; // Track if we've already sent session-created event
     let messageBuffer = ''; // Buffer for accumulating assistant messages
@@ -60,10 +60,22 @@ async function spawnGemini(command, options = {}, ws) {
       args.push('--output-format', 'stream-json');
     }
     
-    // Add yolo flag if enabled
-    if (skipPermissions || settings.skipPermissions) {
-      args.push('--yolo');
-      console.log('⚠️  Using --yolo flag (skip permissions)');
+    // Map permissionMode to the new unified --approval-mode approach
+    if (permissionMode) {
+      let geminiApprovalMode = 'default';
+      if (permissionMode === 'acceptEdits') {
+        geminiApprovalMode = 'auto_edit';
+      } else if (permissionMode === 'bypassPermissions') {
+        geminiApprovalMode = 'yolo';
+      }
+      // 'default' and 'plan' (per user instruction) will stay as 'default'
+      
+      args.push(`--approval-mode=${geminiApprovalMode}`);
+      console.log(`🛡️  Using approval mode: ${geminiApprovalMode} (mapped from ${permissionMode})`);
+    } else if (skipPermissions || settings.skipPermissions) {
+      // Fallback to legacy skipPermissions if permissionMode is not provided
+      args.push('--approval-mode=yolo');
+      console.log('⚠️  Using yolo approval mode (skip permissions)');
     }
     
     // Use cwd (actual project directory) instead of projectPath

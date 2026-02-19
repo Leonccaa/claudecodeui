@@ -618,6 +618,7 @@ export function useChatComposerState({
             sessionId: effectiveSessionId,
             resume: Boolean(effectiveSessionId),
             model: geminiModel,
+            permissionMode: permissionMode === 'plan' ? 'default' : permissionMode,
             skipPermissions: geminiSkipPermissions,
             toolsSettings: {
               ...toolsSettings,
