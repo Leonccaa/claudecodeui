@@ -9,6 +9,96 @@ const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
 
 let activeGeminiProcesses = new Map(); // Track active processes by session ID
 
+const SUPPORTED_GEMINI_MODELS = new Set([
+  'auto-gemini-3',
+  'auto-gemini-2.5',
+  'gemini-3-pro-preview',
+  'gemini-3-flash-preview',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+]);
+const DEFAULT_GEMINI_MODEL = 'auto-gemini-3';
+
+function uniqueNonEmpty(values = []) {
+  return Array.from(
+    new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .filter(Boolean),
+    ),
+  );
+}
+
+function normalizeGeminiAllowedTool(entry) {
+  if (!entry || typeof entry !== 'string') {
+    return null;
+  }
+
+  const normalized = entry.trim();
+  const shellMatch = normalized.match(/^Shell\((.*)\)$/i);
+  if (shellMatch) {
+    const command = shellMatch[1]?.trim();
+    return command ? `ShellTool(${command})` : 'run_shell_command';
+  }
+
+  return normalized;
+}
+
+function escapeTomlString(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function parseGeminiDisallowedEntry(entry) {
+  const normalized = String(entry || '').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const shellLikeMatch = normalized.match(/^(?:Shell|ShellTool)\((.*)\)$/i);
+  if (shellLikeMatch) {
+    const command = shellLikeMatch[1]?.trim();
+    if (!command) {
+      return { toolName: 'run_shell_command' };
+    }
+    return { toolName: 'run_shell_command', commandPrefix: command };
+  }
+
+  if (/^(?:Shell|ShellTool)$/i.test(normalized)) {
+    return { toolName: 'run_shell_command' };
+  }
+
+  return { toolName: normalized };
+}
+
+async function createGeminiPolicyFile(disallowedEntries = []) {
+  const normalizedEntries = uniqueNonEmpty(disallowedEntries)
+    .map(parseGeminiDisallowedEntry)
+    .filter(Boolean);
+
+  if (normalizedEntries.length === 0) {
+    return null;
+  }
+
+  const lines = [];
+  normalizedEntries.forEach((entry, index) => {
+    lines.push('[[rule]]');
+    lines.push(`toolName = "${escapeTomlString(entry.toolName)}"`);
+    if (entry.commandPrefix) {
+      lines.push(`commandPrefix = "${escapeTomlString(entry.commandPrefix)}"`);
+    }
+    lines.push('decision = "deny"');
+    lines.push(`priority = ${900 - (index % 100)}`);
+    lines.push('');
+  });
+
+  const policyDir = path.join(os.homedir(), '.gemini', 'cloudcli-policies');
+  await fs.mkdir(policyDir, { recursive: true });
+  const policyPath = path.join(policyDir, `policy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.toml`);
+  await fs.writeFile(policyPath, lines.join('\n'), 'utf8');
+  return policyPath;
+}
+
 function extractGeminiTextContent(content) {
   if (typeof content === 'string') {
     return content;
@@ -84,12 +174,26 @@ function isIgnorableGeminiStderr(line) {
   );
 }
 
+function normalizeGeminiModel(model) {
+  if (typeof model !== 'string') {
+    return DEFAULT_GEMINI_MODEL;
+  }
+
+  const normalized = model.trim();
+  if (SUPPORTED_GEMINI_MODELS.has(normalized)) {
+    return normalized;
+  }
+
+  return DEFAULT_GEMINI_MODEL;
+}
+
 async function spawnGemini(command, options = {}, ws) {
   return new Promise(async (resolve, reject) => {
     const { sessionId, projectPath, cwd, resume, toolsSettings, skipPermissions, model, images, permissionMode } = options;
     let capturedSessionId = sessionId; // Track session ID throughout the process
     let sessionCreatedSent = false; // Track if we've already sent session-created event
     let messageBuffer = ''; // Buffer for accumulating assistant messages
+    let policyFilePath = null;
     
     // Use tools settings passed from frontend, or defaults
     const settings = toolsSettings || {
@@ -110,8 +214,12 @@ async function spawnGemini(command, options = {}, ws) {
       args.push('-p', command);
 
       // Add model flag if specified
-      if (!sessionId && model) {
-        args.push('--model', model);
+      if (!sessionId) {
+        const resolvedModel = normalizeGeminiModel(model);
+        if (model && model !== resolvedModel) {
+          console.warn(`Unsupported Gemini model "${model}", falling back to "${resolvedModel}"`);
+        }
+        args.push('--model', resolvedModel);
       }
 
       // Request streaming JSON
@@ -124,6 +232,28 @@ async function spawnGemini(command, options = {}, ws) {
       settingsSkipPermissions: settings?.skipPermissions
     });
     args.push(`--approval-mode=${geminiApprovalMode}`);
+
+    // Gemini CLI supports allowlists via --allowed-tools.
+    const allowedTools = uniqueNonEmpty(settings?.allowedTools || settings?.allowedCommands || [])
+      .map(normalizeGeminiAllowedTool)
+      .filter(Boolean);
+    for (const tool of allowedTools) {
+      args.push(`--allowed-tools=${tool}`);
+    }
+
+    // Gemini CLI does not expose --blocked-tools; use policy deny rules instead.
+    const disallowedTools = uniqueNonEmpty(settings?.disallowedTools || settings?.disallowedCommands || []);
+    if (disallowedTools.length > 0) {
+      try {
+        policyFilePath = await createGeminiPolicyFile(disallowedTools);
+        if (policyFilePath) {
+          args.push(`--policy=${policyFilePath}`);
+        }
+      } catch (error) {
+        console.warn('Failed to create Gemini policy file from disallowed tools:', error?.message || error);
+      }
+    }
+
     console.log(
       `🛡️  Using approval mode: ${geminiApprovalMode}` +
       ` (permissionMode=${permissionMode || 'unset'}, skipPermissions=${Boolean(skipPermissions || settings?.skipPermissions)})`
@@ -320,6 +450,9 @@ async function spawnGemini(command, options = {}, ws) {
       console.log(`Gemini CLI process exited with code ${code}`);
       const finalSessionId = capturedSessionId || sessionId || tempKey;
       removeProcessEntries(geminiProcess);
+      if (policyFilePath) {
+        fs.unlink(policyFilePath).catch(() => {});
+      }
 
       ws.send({
         type: 'claude-complete',
@@ -334,6 +467,9 @@ async function spawnGemini(command, options = {}, ws) {
     geminiProcess.on('error', (error) => {
       console.error('Gemini CLI process error:', error);
       removeProcessEntries(geminiProcess);
+      if (policyFilePath) {
+        fs.unlink(policyFilePath).catch(() => {});
+      }
       reject(error);
     });
     

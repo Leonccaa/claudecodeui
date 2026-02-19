@@ -111,14 +111,30 @@ const extractGeminiToolResultText = (payload: any): string => {
   }
 
   const deepOutputCandidates: string[] = [];
+  const summaryCandidates: string[] = [];
+  const summaryPattern = /^Listed\s+\d+\s+item\(s\)\.?$/i;
+
+  const collectString = (value: unknown) => {
+    if (typeof value !== 'string') {
+      return;
+    }
+    const normalized = value.trim();
+    if (!normalized) {
+      return;
+    }
+    if (summaryPattern.test(normalized)) {
+      summaryCandidates.push(normalized);
+      return;
+    }
+    deepOutputCandidates.push(normalized);
+  };
 
   if (Array.isArray(payload.result)) {
-    const textFromArray = payload.result
-      .map((item: any) => item?.functionResponse?.response?.output || item?.output || '')
-      .filter(Boolean)
-      .join('\n');
-    if (textFromArray) {
-      deepOutputCandidates.push(textFromArray);
+    for (const item of payload.result) {
+      collectString(item?.functionResponse?.response?.output);
+      collectString(item?.response?.output);
+      collectString(item?.output);
+      collectString(item?.resultDisplay);
     }
   }
 
@@ -127,12 +143,15 @@ const extractGeminiToolResultText = (payload: any): string => {
     || payload?.output
     || payload?.result?.output
     || payload?.tool_result?.output;
-  if (typeof directOutput === 'string' && directOutput.trim()) {
-    deepOutputCandidates.push(directOutput);
-  }
+  collectString(directOutput);
+
+  collectString(payload?.resultDisplay);
+  collectString(payload?.displayText);
+  collectString(payload?.message);
 
   if (deepOutputCandidates.length > 0) {
-    return deepOutputCandidates.join('\n');
+    // Prefer the richest tool payload (usually detailed output rather than short summary).
+    return deepOutputCandidates.sort((a, b) => b.length - a.length)[0];
   }
 
   if (typeof payload.output === 'string') {
@@ -147,8 +166,49 @@ const extractGeminiToolResultText = (payload: any): string => {
     return payload.result;
   }
 
+  if (summaryCandidates.length > 0) {
+    return summaryCandidates[0];
+  }
+
   return toDisplayText(payload.result ?? payload);
 };
+
+const isTemporarySessionId = (sessionId?: string | null) =>
+  Boolean(sessionId && sessionId.startsWith('new-session-'));
+
+function formatGeminiCliError(errorText: string): { content: string; asError: boolean; modelNotFound: boolean } {
+  const normalized = String(errorText || '');
+  const isModelNotFound = /ModelNotFoundError|Requested entity was not found/i.test(normalized);
+  const isQuotaExceeded =
+    /exhausted your capacity on this model|quota will reset after|TerminalQuotaError/i.test(normalized);
+  const resetMatch = normalized.match(/reset after\s+([^.\n]+)/i);
+  const resetIn = resetMatch?.[1]?.trim();
+
+  if (isModelNotFound) {
+    return {
+      asError: true,
+      modelNotFound: true,
+      content:
+        'Gemini model unavailable in current environment. Please switch to Auto Gemini 3, Auto Gemini 2.5, Gemini 3 Flash Preview, or Gemini 2.5 Flash Lite.',
+    };
+  }
+
+  if (isQuotaExceeded) {
+    return {
+      asError: false,
+      modelNotFound: false,
+      content: resetIn
+        ? `Gemini model quota exhausted. Quota reset in about ${resetIn}. Suggested fallback: Auto Gemini 2.5 or Gemini 2.5 Flash Lite.`
+        : 'Gemini model quota exhausted. Suggested fallback: Auto Gemini 2.5 or Gemini 2.5 Flash Lite.',
+    };
+  }
+
+  return {
+    asError: true,
+    modelNotFound: false,
+    content: `Gemini error: ${normalized}`,
+  };
+}
 
 export function useChatRealtimeHandlers({
   latestMessage,
@@ -234,6 +294,8 @@ export function useChatRealtimeHandlers({
       ? rawStructuredData?.session_id
       : null;
 
+    const pendingSessionIdFromStorage =
+      typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
     const hasPendingUnboundSession =
       Boolean(pendingViewSessionRef.current) && pendingViewSessionRef.current?.sessionId === null;
     const activeViewSessionId = hasPendingUnboundSession
@@ -242,15 +304,41 @@ export function useChatRealtimeHandlers({
     const isSystemInitForView =
       systemInitSessionId &&
       (hasPendingUnboundSession || !activeViewSessionId || systemInitSessionId === activeViewSessionId);
-    const shouldBypassSessionFilter = isGlobalMessage || Boolean(isSystemInitForView);
+    const isLifecycleForPendingSession =
+      Boolean(
+        latestMessage.sessionId &&
+          pendingSessionIdFromStorage &&
+          latestMessage.sessionId === pendingSessionIdFromStorage &&
+          lifecycleMessageTypes.has(String(latestMessage.type)),
+      );
+    const isGeminiLifecycleMessage =
+      provider === 'gemini' &&
+      (latestMessage.type === 'gemini-error' ||
+        latestMessage.type === 'gemini-result' ||
+        latestMessage.type === 'claude-complete');
+    const hasTemporaryViewSession =
+      isTemporarySessionId(currentSessionId) || isTemporarySessionId(selectedSession?.id);
+    const shouldBypassGeminiPendingLifecycle =
+      isGeminiLifecycleMessage &&
+      (hasPendingUnboundSession || hasTemporaryViewSession || Boolean(pendingSessionIdFromStorage));
+    const shouldBypassSessionFilter =
+      isGlobalMessage ||
+      Boolean(isSystemInitForView) ||
+      (hasTemporaryViewSession && isLifecycleForPendingSession) ||
+      shouldBypassGeminiPendingLifecycle;
+    const isErrorMessageType =
+      latestMessage.type === 'claude-error' ||
+      latestMessage.type === 'cursor-error' ||
+      latestMessage.type === 'codex-error' ||
+      latestMessage.type === 'gemini-error';
     const isUnscopedError =
       !latestMessage.sessionId &&
-      pendingViewSessionRef.current &&
-      !pendingViewSessionRef.current.sessionId &&
-      (latestMessage.type === 'claude-error' ||
-        latestMessage.type === 'cursor-error' ||
-        latestMessage.type === 'codex-error' ||
-        latestMessage.type === 'gemini-error');
+      isErrorMessageType &&
+      (
+        (pendingViewSessionRef.current && !pendingViewSessionRef.current.sessionId) ||
+        Boolean(pendingSessionIdFromStorage) ||
+        hasTemporaryViewSession
+      );
 
     const handleBackgroundLifecycle = (sessionId?: string) => {
       if (!sessionId) {
@@ -628,6 +716,25 @@ export function useChatRealtimeHandlers({
         try {
           const geminiData = latestMessage.data;
           if (geminiData && geminiData.type === 'init' && geminiData.session_id) {
+            if (typeof geminiData.model === 'string' && geminiData.model.trim()) {
+              setChatMessages((previous) => {
+                const modelText = `Gemini model in use: ${geminiData.model.trim()}`;
+                const alreadyShown = previous.some(
+                  (message) => message.type === 'assistant' && message.content === modelText,
+                );
+                if (alreadyShown) {
+                  return previous;
+                }
+                return [
+                  ...previous,
+                  {
+                    type: 'assistant',
+                    content: modelText,
+                    timestamp: new Date(),
+                  },
+                ];
+              });
+            }
             if (!isSystemInitForView) { return; }
             if (currentSessionId && geminiData.session_id !== currentSessionId) {
               setIsSystemSessionChange(true);
@@ -704,26 +811,59 @@ export function useChatRealtimeHandlers({
         break;
       
       case 'gemini-error':
+        {
+        const errorText = String(latestMessage.error || 'Unknown error');
+        const normalizedGeminiError = formatGeminiCliError(errorText);
+        const isModelNotFound = normalizedGeminiError.modelNotFound;
+        const pendingSessionIdFromStorage =
+          typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
+        const resolvedGeminiSessionId =
+          latestMessage.sessionId || pendingSessionIdFromStorage || currentSessionId || null;
+
+        if (
+          latestMessage.sessionId &&
+          (!currentSessionId || isTemporarySessionId(currentSessionId))
+        ) {
+          setCurrentSessionId(latestMessage.sessionId);
+        }
+        if (
+          pendingViewSessionRef.current &&
+          !pendingViewSessionRef.current.sessionId &&
+          latestMessage.sessionId
+        ) {
+          pendingViewSessionRef.current.sessionId = latestMessage.sessionId;
+        }
+
         clearLoadingIndicators();
         markSessionsAsCompleted(
-          latestMessage.sessionId || currentSessionId,
+          resolvedGeminiSessionId,
           currentSessionId,
           selectedSession?.id,
-          typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null,
+          pendingSessionIdFromStorage,
         );
+        if (isModelNotFound && typeof window !== 'undefined') {
+          // Do not keep resuming a broken session initialized with an unavailable model.
+          sessionStorage.removeItem('pendingSessionId');
+          if (!selectedSession?.id || isTemporarySessionId(currentSessionId)) {
+            setCurrentSessionId(null);
+          }
+        }
         setChatMessages((previous) => [
           ...previous,
           {
-            type: 'error',
-            content: `Gemini error: ${latestMessage.error || 'Unknown error'}`,
+            type: normalizedGeminiError.asError ? 'error' : 'assistant',
+            content: normalizedGeminiError.content,
             timestamp: new Date(),
           },
         ]);
         break;
+        }
         
       case 'gemini-result': {
         const geminiCompletedSessionId = latestMessage.sessionId || currentSessionId;
         const pendingGeminiSessionId = sessionStorage.getItem('pendingSessionId');
+        const resultData = latestMessage.data || {};
+        const resultStatus = String(resultData.status || '').toLowerCase();
 
         clearLoadingIndicators();
         markSessionsAsCompleted(
@@ -741,6 +881,20 @@ export function useChatRealtimeHandlers({
           setCurrentSessionId(geminiCompletedSessionId);
           sessionStorage.removeItem('pendingSessionId');
           console.log('Gemini session complete, ID set to:', geminiCompletedSessionId);
+        }
+
+        if (resultStatus === 'error') {
+          const errorText =
+            String(resultData?.error?.message || latestMessage.error || 'Unknown Gemini error');
+          const normalizedGeminiError = formatGeminiCliError(errorText);
+          setChatMessages((previous) => [
+            ...previous,
+            {
+              type: normalizedGeminiError.asError ? 'error' : 'assistant',
+              content: normalizedGeminiError.content,
+              timestamp: new Date(),
+            },
+          ]);
         }
         break;
       }

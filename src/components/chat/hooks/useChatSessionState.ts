@@ -37,6 +37,17 @@ interface ScrollRestoreState {
   top: number;
 }
 
+const isGeminiTransientNotice = (message: ChatMessage): boolean => {
+  if (!message || typeof message.content !== 'string') {
+    return false;
+  }
+  return (
+    message.content.startsWith('Gemini model in use:') ||
+    message.content.startsWith('Gemini model quota exhausted.') ||
+    message.content.startsWith('Gemini model unavailable in current environment.')
+  );
+};
+
 export function useChatSessionState({
   selectedProject,
   selectedSession,
@@ -343,10 +354,20 @@ export function useChatSessionState({
       if (selectedSession && selectedProject) {
         const provider = selectedSession.__provider || (localStorage.getItem('selected-provider') as Provider) || 'claude';
         isLoadingSessionRef.current = true;
+        const pendingSessionIdFromStorage =
+          typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
+        const hasPendingViewSession = Boolean(pendingViewSessionRef.current);
+        const isTemporaryCurrentSession = Boolean(
+          currentSessionId && currentSessionId.startsWith('new-session-'),
+        );
+        const shouldPreserveTransientView =
+          hasPendingViewSession ||
+          isTemporaryCurrentSession ||
+          Boolean(pendingSessionIdFromStorage);
 
         const sessionChanged = currentSessionId !== null && currentSessionId !== selectedSession.id;
         if (sessionChanged) {
-          if (!isSystemSessionChange) {
+          if (!isSystemSessionChange && !shouldPreserveTransientView) {
             resetStreamingState();
             pendingViewSessionRef.current = null;
             setChatMessages([]);
@@ -418,7 +439,19 @@ export function useChatSessionState({
           }
         }
       } else {
-        if (!isSystemSessionChange) {
+        const hasPendingViewSession = Boolean(pendingViewSessionRef.current);
+        const isTemporaryCurrentSession = Boolean(
+          currentSessionId && currentSessionId.startsWith('new-session-'),
+        );
+        const pendingSessionIdFromStorage =
+          typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
+        const forceNewSession =
+          typeof window !== 'undefined' && sessionStorage.getItem('forceNewSession') === '1';
+        const shouldPreserveTransientView =
+          !forceNewSession &&
+          (hasPendingViewSession || isTemporaryCurrentSession || Boolean(pendingSessionIdFromStorage));
+
+        if (forceNewSession || (!isSystemSessionChange && !shouldPreserveTransientView)) {
           resetStreamingState();
           pendingViewSessionRef.current = null;
           setChatMessages([]);
@@ -428,7 +461,14 @@ export function useChatSessionState({
           setIsLoading(false);
         }
 
-        setCurrentSessionId(null);
+        if (forceNewSession || !shouldPreserveTransientView) {
+          setCurrentSessionId(null);
+          pendingViewSessionRef.current = null;
+        }
+        if (forceNewSession && typeof window !== 'undefined') {
+          sessionStorage.removeItem('forceNewSession');
+          setIsSystemSessionChange(false);
+        }
         sessionStorage.removeItem('cursorSessionId');
         messagesOffsetRef.current = 0;
         setHasMoreMessages(false);
@@ -511,9 +551,49 @@ export function useChatSessionState({
 
   useEffect(() => {
     if (sessionMessages.length > 0) {
-      setChatMessages(convertedMessages);
+      setChatMessages((previous) => {
+        const pendingSessionId =
+          typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
+        const isPendingOrTransientSession =
+          Boolean(pendingViewSessionRef.current) ||
+          Boolean(pendingSessionId) ||
+          Boolean(currentSessionId && currentSessionId.startsWith('new-session-'));
+
+        // During early new-session lifecycle, backend history can momentarily be empty.
+        // Preserve live-streamed UI messages (including errors) until real history is available.
+        if (isPendingOrTransientSession && convertedMessages.length === 0 && previous.length > 0) {
+          return previous;
+        }
+
+        const activeProvider =
+          selectedSession?.__provider || (localStorage.getItem('selected-provider') as Provider) || 'claude';
+        if (activeProvider !== 'gemini') {
+          return convertedMessages;
+        }
+
+        // Preserve Gemini runtime notices when history refresh lands without these synthetic messages.
+        const transientNotices = previous.filter(isGeminiTransientNotice);
+        if (transientNotices.length === 0) {
+          return convertedMessages;
+        }
+
+        const existingNoticeContents = new Set(
+          convertedMessages
+            .filter((message) => typeof message.content === 'string')
+            .map((message) => message.content),
+        );
+        const noticesToAppend = transientNotices.filter(
+          (message) => !existingNoticeContents.has(message.content),
+        );
+
+        if (noticesToAppend.length === 0) {
+          return convertedMessages;
+        }
+
+        return [...convertedMessages, ...noticesToAppend];
+      });
     }
-  }, [convertedMessages, sessionMessages.length]);
+  }, [convertedMessages, currentSessionId, pendingViewSessionRef, selectedSession?.__provider, sessionMessages.length]);
 
   useEffect(() => {
     if (selectedProject && chatMessages.length > 0) {

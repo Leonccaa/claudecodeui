@@ -37,6 +37,22 @@ const commonCursorCommands = [
   'Shell(node)'
 ];
 
+// Common shell commands for Gemini (maps to Gemini ShellTool syntax)
+const commonGeminiCommands = [
+  'ShellTool(ls)',
+  'ShellTool(mkdir)',
+  'ShellTool(cd)',
+  'ShellTool(cat)',
+  'ShellTool(echo)',
+  'ShellTool(git status)',
+  'ShellTool(git diff)',
+  'ShellTool(git log)',
+  'ShellTool(npm install)',
+  'ShellTool(npm run)',
+  'ShellTool(python)',
+  'ShellTool(node)'
+];
+
 // Claude Permissions
 function ClaudePermissions({
   skipPermissions,
@@ -598,10 +614,44 @@ function CodexPermissions({ permissionMode, setPermissionMode }) {
 }
 
 // Gemini Permissions
-function GeminiPermissions({ skipPermissions, setSkipPermissions }) {
+function GeminiPermissions({
+  skipPermissions,
+  setSkipPermissions,
+  allowedCommands,
+  setAllowedCommands,
+  disallowedCommands,
+  setDisallowedCommands,
+  newAllowedCommand,
+  setNewAllowedCommand,
+  newDisallowedCommand,
+  setNewDisallowedCommand,
+}) {
   const { t } = useTranslation('settings');
+  const addAllowedCommand = (cmd) => {
+    if (cmd && !allowedCommands.includes(cmd)) {
+      setAllowedCommands([...allowedCommands, cmd]);
+      setNewAllowedCommand('');
+    }
+  };
+
+  const removeAllowedCommand = (cmd) => {
+    setAllowedCommands(allowedCommands.filter(c => c !== cmd));
+  };
+
+  const addDisallowedCommand = (cmd) => {
+    if (cmd && !disallowedCommands.includes(cmd)) {
+      setDisallowedCommands([...disallowedCommands, cmd]);
+      setNewDisallowedCommand('');
+    }
+  };
+
+  const removeDisallowedCommand = (cmd) => {
+    setDisallowedCommands(disallowedCommands.filter(c => c !== cmd));
+  };
+
   return (
     <div className="space-y-6">
+      {/* Skip Permissions */}
       <div className="space-y-4">
         <div className="flex items-center gap-3">
           <AlertTriangle className="w-5 h-5 text-orange-500" />
@@ -626,6 +676,146 @@ function GeminiPermissions({ skipPermissions, setSkipPermissions }) {
               </div>
             </div>
           </label>
+        </div>
+      </div>
+
+      {/* Allowed Commands */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Shield className="w-5 h-5 text-green-500" />
+          <h3 className="text-lg font-medium text-foreground">
+            {t('permissions.allowedCommands.title')}
+          </h3>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {t('permissions.allowedCommands.description')}
+        </p>
+
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Input
+            value={newAllowedCommand}
+            onChange={(e) => setNewAllowedCommand(e.target.value)}
+            placeholder={'e.g., "ShellTool(ls)" or "run_shell_command"'}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addAllowedCommand(newAllowedCommand);
+              }
+            }}
+            className="flex-1 h-10"
+          />
+          <Button
+            onClick={() => addAllowedCommand(newAllowedCommand)}
+            disabled={!newAllowedCommand}
+            size="sm"
+            className="h-10 px-4"
+          >
+            <Plus className="w-4 h-4 mr-2 sm:mr-0" />
+            <span className="sm:hidden">{t('permissions.actions.add')}</span>
+          </Button>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t('permissions.allowedCommands.quickAdd')}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {commonGeminiCommands.map(cmd => (
+              <Button
+                key={cmd}
+                variant="outline"
+                size="sm"
+                onClick={() => addAllowedCommand(cmd)}
+                disabled={allowedCommands.includes(cmd)}
+                className="text-xs h-8"
+              >
+                {cmd}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {allowedCommands.map(cmd => (
+            <div key={cmd} className="flex items-center justify-between bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
+              <span className="font-mono text-sm text-green-800 dark:text-green-200">
+                {cmd}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => removeAllowedCommand(cmd)}
+                className="text-green-600 hover:text-green-700"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          ))}
+          {allowedCommands.length === 0 && (
+            <div className="text-center py-6 text-gray-500 dark:text-gray-400">
+              {t('permissions.allowedCommands.empty')}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Disallowed Commands */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-red-500" />
+          <h3 className="text-lg font-medium text-foreground">
+            {t('permissions.blockedCommands.title')}
+          </h3>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {t('permissions.blockedCommands.description')}
+        </p>
+
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Input
+            value={newDisallowedCommand}
+            onChange={(e) => setNewDisallowedCommand(e.target.value)}
+            placeholder={'e.g., "ShellTool(rm -rf)" or "run_shell_command"'}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addDisallowedCommand(newDisallowedCommand);
+              }
+            }}
+            className="flex-1 h-10"
+          />
+          <Button
+            onClick={() => addDisallowedCommand(newDisallowedCommand)}
+            disabled={!newDisallowedCommand}
+            size="sm"
+            className="h-10 px-4"
+          >
+            <Plus className="w-4 h-4 mr-2 sm:mr-0" />
+            <span className="sm:hidden">{t('permissions.actions.add')}</span>
+          </Button>
+        </div>
+
+        <div className="space-y-2">
+          {disallowedCommands.map(cmd => (
+            <div key={cmd} className="flex items-center justify-between bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <span className="font-mono text-sm text-red-800 dark:text-red-200">
+                {cmd}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => removeDisallowedCommand(cmd)}
+                className="text-red-600 hover:text-red-700"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          ))}
+          {disallowedCommands.length === 0 && (
+            <div className="text-center py-6 text-gray-500 dark:text-gray-400">
+              {t('permissions.blockedCommands.empty')}
+            </div>
+          )}
         </div>
       </div>
     </div>

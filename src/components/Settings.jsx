@@ -84,11 +84,15 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
   const [cursorAllowedCommands, setCursorAllowedCommands] = useState([]);
   const [cursorDisallowedCommands, setCursorDisallowedCommands] = useState([]);
   const [cursorSkipPermissions, setCursorSkipPermissions] = useState(false);
+  const [geminiAllowedCommands, setGeminiAllowedCommands] = useState([]);
+  const [geminiDisallowedCommands, setGeminiDisallowedCommands] = useState([]);
   const [geminiSkipPermissions, setGeminiSkipPermissions] = useState(() =>
     localStorage.getItem('gemini-skip-permissions') === 'true'
   );
   const [newCursorCommand, setNewCursorCommand] = useState('');
   const [newCursorDisallowedCommand, setNewCursorDisallowedCommand] = useState('');
+  const [newGeminiCommand, setNewGeminiCommand] = useState('');
+  const [newGeminiDisallowedCommand, setNewGeminiDisallowedCommand] = useState('');
   const [cursorMcpServers, setCursorMcpServers] = useState([]);
 
   // Codex-specific states
@@ -580,6 +584,19 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
         setCodexPermissionMode('default');
       }
 
+      // Load Gemini settings from localStorage
+      const savedGeminiSettings = localStorage.getItem('gemini-settings');
+      if (savedGeminiSettings) {
+        const geminiSettings = JSON.parse(savedGeminiSettings);
+        setGeminiAllowedCommands(geminiSettings.allowedCommands || []);
+        setGeminiDisallowedCommands(geminiSettings.disallowedCommands || []);
+        setGeminiSkipPermissions(Boolean(geminiSettings.skipPermissions));
+      } else {
+        setGeminiAllowedCommands([]);
+        setGeminiDisallowedCommands([]);
+        setGeminiSkipPermissions(localStorage.getItem('gemini-skip-permissions') === 'true');
+      }
+
       // Load MCP servers from API
       await fetchMcpServers();
 
@@ -594,6 +611,9 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
       setDisallowedTools([]);
       setSkipPermissions(false);
       setProjectSortOrder('name');
+      setGeminiAllowedCommands([]);
+      setGeminiDisallowedCommands([]);
+      setGeminiSkipPermissions(localStorage.getItem('gemini-skip-permissions') === 'true');
     }
   };
 
@@ -750,10 +770,20 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
         lastUpdated: new Date().toISOString()
       };
 
+      // Save Gemini settings
+      const geminiSettings = {
+        allowedCommands: geminiAllowedCommands,
+        disallowedCommands: geminiDisallowedCommands,
+        skipPermissions: geminiSkipPermissions,
+        lastUpdated: new Date().toISOString()
+      };
+
       // Save to localStorage
       localStorage.setItem('claude-settings', JSON.stringify(claudeSettings));
       localStorage.setItem('cursor-tools-settings', JSON.stringify(cursorSettings));
       localStorage.setItem('codex-settings', JSON.stringify(codexSettings));
+      localStorage.setItem('gemini-settings', JSON.stringify(geminiSettings));
+      localStorage.setItem('gemini-skip-permissions', String(geminiSkipPermissions));
 
       setSaveStatus('success');
       
@@ -1432,8 +1462,16 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
                         skipPermissions={geminiSkipPermissions}
                         setSkipPermissions={(val) => {
                           setGeminiSkipPermissions(val);
-                          localStorage.setItem('gemini-skip-permissions', val);
+                          localStorage.setItem('gemini-skip-permissions', String(val));
                         }}
+                        allowedCommands={geminiAllowedCommands}
+                        setAllowedCommands={setGeminiAllowedCommands}
+                        disallowedCommands={geminiDisallowedCommands}
+                        setDisallowedCommands={setGeminiDisallowedCommands}
+                        newAllowedCommand={newGeminiCommand}
+                        setNewAllowedCommand={setNewGeminiCommand}
+                        newDisallowedCommand={newGeminiDisallowedCommand}
+                        setNewDisallowedCommand={setNewGeminiDisallowedCommand}
                       />
                     )}
 

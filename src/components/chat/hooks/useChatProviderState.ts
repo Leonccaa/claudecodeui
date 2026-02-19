@@ -4,6 +4,23 @@ import { CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS, GEMINI_MODELS } from '../..
 import type { PendingPermissionRequest, PermissionMode, Provider } from '../types/types';
 import type { ProjectSession, SessionProvider } from '../../../types/app';
 
+type ModelConfig = {
+  OPTIONS: Array<{ value: string; label: string }>;
+  DEFAULT: string;
+};
+
+function getValidatedModelFromStorage(storageKey: string, modelConfig: ModelConfig): string {
+  const storedModel = localStorage.getItem(storageKey);
+  const allowedModels = new Set(modelConfig.OPTIONS.map((option) => option.value));
+
+  if (storedModel && allowedModels.has(storedModel)) {
+    return storedModel;
+  }
+
+  localStorage.setItem(storageKey, modelConfig.DEFAULT);
+  return modelConfig.DEFAULT;
+}
+
 interface UseChatProviderStateArgs {
   selectedSession: ProjectSession | null;
 }
@@ -15,16 +32,16 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     return (localStorage.getItem('selected-provider') as SessionProvider) || 'claude';
   });
   const [cursorModel, setCursorModel] = useState<string>(() => {
-    return localStorage.getItem('cursor-model') || CURSOR_MODELS.DEFAULT;
+    return getValidatedModelFromStorage('cursor-model', CURSOR_MODELS);
   });
   const [claudeModel, setClaudeModel] = useState<string>(() => {
-    return localStorage.getItem('claude-model') || CLAUDE_MODELS.DEFAULT;
+    return getValidatedModelFromStorage('claude-model', CLAUDE_MODELS);
   });
   const [codexModel, setCodexModel] = useState<string>(() => {
-    return localStorage.getItem('codex-model') || CODEX_MODELS.DEFAULT;
+    return getValidatedModelFromStorage('codex-model', CODEX_MODELS);
   });
   const [geminiModel, setGeminiModel] = useState<string>(() => {
-    return localStorage.getItem('gemini-model') || GEMINI_MODELS.DEFAULT;
+    return getValidatedModelFromStorage('gemini-model', GEMINI_MODELS);
   });
 
   const lastProviderRef = useRef(provider);

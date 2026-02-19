@@ -72,10 +72,12 @@ export const CODEX_MODELS = {
 export const GEMINI_MODELS = {
   OPTIONS: [
     { value: 'auto-gemini-3', label: 'Auto Gemini 3' },
-    { value: 'gemini-3-pro', label: 'Gemini 3 Pro' },
-    { value: 'gemini-3-flash', label: 'Gemini 3 Flash' },
-    { value: 'gemini-2.0-pro-exp-02-05', label: 'Gemini 2.0 Pro Exp' },
-    { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' }
+    { value: 'auto-gemini-2.5', label: 'Auto Gemini 2.5' },
+    { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview' },
+    { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview' },
+    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+    { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' }
   ],
 
   DEFAULT: 'auto-gemini-3'
