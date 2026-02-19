@@ -45,7 +45,13 @@ import mime from 'mime-types';
 import { getProjects, getSessions, getSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
-import { spawnGemini, abortGeminiSession, isGeminiSessionActive, getActiveGeminiSessions } from './gemini-cli.js';
+import {
+    spawnGemini,
+    abortGeminiSession,
+    abortAnyGeminiSession,
+    isGeminiSessionActive,
+    getActiveGeminiSessions
+} from './gemini-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
 import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
@@ -996,7 +1002,9 @@ function handleChatConnection(ws) {
                 if (provider === 'cursor') {
                     success = abortCursorSession(data.sessionId);
                 } else if (provider === 'gemini') {
-                    success = abortGeminiSession(data.sessionId);
+                    success = data.sessionId
+                        ? abortGeminiSession(data.sessionId)
+                        : abortAnyGeminiSession();
                 } else if (provider === 'codex') {
                     success = abortCodexSession(data.sessionId);
                 } else {

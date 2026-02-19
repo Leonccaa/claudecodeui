@@ -851,6 +851,14 @@ export function useChatComposerState({
       candidateSessionIds.find((sessionId) => Boolean(sessionId) && !isTemporarySessionId(sessionId)) || null;
 
     if (!targetSessionId) {
+      if (provider === 'gemini') {
+        sendMessage({
+          type: 'abort-session',
+          sessionId: null,
+          provider,
+        });
+        return;
+      }
       console.warn('Abort requested but no concrete session ID is available yet.');
       return;
     }

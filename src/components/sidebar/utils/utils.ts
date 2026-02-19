@@ -40,15 +40,15 @@ export const persistStarredProjects = (starredProjects: Set<string>) => {
 };
 
 export const getSessionDate = (session: SessionWithProvider): Date => {
-  if (session.__provider === 'cursor' || session.__provider === 'gemini') {
-    return new Date(session.createdAt || 0);
-  }
+  const latestActivity =
+    session.updated_at ||
+    (typeof session.lastUpdated === 'string' ? session.lastUpdated : '') ||
+    session.lastActivity ||
+    session.createdAt ||
+    session.created_at ||
+    '';
 
-  if (session.__provider === 'codex') {
-    return new Date(session.createdAt || session.lastActivity || 0);
-  }
-
-  return new Date(session.lastActivity || 0);
+  return new Date(latestActivity || 0);
 };
 
 export const getSessionName = (session: SessionWithProvider, t: TFunction): string => {
@@ -64,15 +64,14 @@ export const getSessionName = (session: SessionWithProvider, t: TFunction): stri
 };
 
 export const getSessionTime = (session: SessionWithProvider): string => {
-  if (session.__provider === 'cursor' || session.__provider === 'gemini') {
-    return String(session.createdAt || '');
-  }
-
-  if (session.__provider === 'codex') {
-    return String(session.createdAt || session.lastActivity || '');
-  }
-
-  return String(session.lastActivity || '');
+  return String(
+    session.updated_at ||
+      (typeof session.lastUpdated === 'string' ? session.lastUpdated : '') ||
+      session.lastActivity ||
+      session.createdAt ||
+      session.created_at ||
+      '',
+  );
 };
 
 export const createSessionViewModel = (

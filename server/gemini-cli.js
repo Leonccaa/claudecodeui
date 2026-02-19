@@ -9,6 +9,63 @@ const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
 
 let activeGeminiProcesses = new Map(); // Track active processes by session ID
 
+function extractGeminiTextContent(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') {
+          return part;
+        }
+        if (part && typeof part.text === 'string') {
+          return part.text;
+        }
+        return '';
+      })
+      .join('');
+  }
+
+  if (content && typeof content === 'object' && typeof content.text === 'string') {
+    return content.text;
+  }
+
+  return '';
+}
+
+function removeProcessEntries(targetProcess) {
+  for (const [key, process] of activeGeminiProcesses.entries()) {
+    if (process === targetProcess) {
+      activeGeminiProcesses.delete(key);
+    }
+  }
+}
+
+function resolveGeminiApprovalMode({ permissionMode, skipPermissions, settingsSkipPermissions }) {
+  // Keep Gemini CLI behavior aligned with UI permission mode semantics.
+  if (permissionMode) {
+    switch (permissionMode) {
+      case 'bypassPermissions':
+        return 'yolo';
+      case 'acceptEdits':
+        return 'auto_edit';
+      case 'plan':
+      case 'default':
+      default:
+        return 'default';
+    }
+  }
+
+  // Backward compatibility for legacy settings when permissionMode is missing.
+  if (skipPermissions || settingsSkipPermissions) {
+    return 'yolo';
+  }
+
+  return 'default';
+}
+
 function isIgnorableGeminiStderr(line) {
   if (!line) {
     return true;
@@ -22,7 +79,8 @@ function isIgnorableGeminiStderr(line) {
   // Gemini CLI sometimes logs informational notices to stderr.
   return (
     normalized.includes('loaded cached credentials') ||
-    normalized.includes('yolo mode is enabled')
+    normalized.includes('yolo mode is enabled') ||
+    normalized.includes('approval mode is enabled')
   );
 }
 
@@ -60,57 +118,57 @@ async function spawnGemini(command, options = {}, ws) {
       args.push('--output-format', 'stream-json');
     }
     
-    // Map permissionMode to the new unified --approval-mode approach
-    if (permissionMode) {
-      let geminiApprovalMode = 'default';
-      if (permissionMode === 'acceptEdits') {
-        geminiApprovalMode = 'auto_edit';
-      } else if (permissionMode === 'bypassPermissions') {
-        geminiApprovalMode = 'yolo';
-      }
-      // 'default' and 'plan' (per user instruction) will stay as 'default'
-      
-      args.push(`--approval-mode=${geminiApprovalMode}`);
-      console.log(`🛡️  Using approval mode: ${geminiApprovalMode} (mapped from ${permissionMode})`);
-    } else if (skipPermissions || settings.skipPermissions) {
-      // Fallback to legacy skipPermissions if permissionMode is not provided
-      args.push('--approval-mode=yolo');
-      console.log('⚠️  Using yolo approval mode (skip permissions)');
-    }
+    const geminiApprovalMode = resolveGeminiApprovalMode({
+      permissionMode,
+      skipPermissions,
+      settingsSkipPermissions: settings?.skipPermissions
+    });
+    args.push(`--approval-mode=${geminiApprovalMode}`);
+    console.log(
+      `🛡️  Using approval mode: ${geminiApprovalMode}` +
+      ` (permissionMode=${permissionMode || 'unset'}, skipPermissions=${Boolean(skipPermissions || settings?.skipPermissions)})`
+    );
     
     // Use cwd (actual project directory) instead of projectPath
     const workingDir = path.resolve(cwd || projectPath || process.cwd());
     
     console.log('Spawning Gemini CLI:', 'gemini', args.join(' '));
-    console.log('Working directory:', workingDir);
-    console.log('Session info - Input sessionId:', sessionId, 'Resume:', resume);
     
     const geminiProcess = spawnFunction('gemini', args, {
       cwd: workingDir,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env } // Inherit all environment variables
+      env: { 
+        ...process.env,
+        // Force unbuffered output for faster streaming
+        PYTHONUNBUFFERED: '1',
+        NODE_NO_WARNINGS: '1',
+        FORCE_COLOR: '1'
+      }
     });
     
     // Store process reference for potential abort
-    const processKey = capturedSessionId || Date.now().toString();
-    activeGeminiProcesses.set(processKey, geminiProcess);
+    // Use both temporary and captured ID to ensure we can abort even during init
+    const tempKey = capturedSessionId || `temp-${Date.now()}`;
+    activeGeminiProcesses.set(tempKey, geminiProcess);
     
+    let stdoutBuffer = ''; 
+
     // Handle stdout (streaming JSON responses)
     geminiProcess.stdout.on('data', (data) => {
-      const rawOutput = data.toString();
-      console.log('📤 Gemini CLI stdout:', rawOutput);
-      
-      const lines = rawOutput.split('\n').filter(line => line.trim());
+      stdoutBuffer += data.toString();
+      const lines = stdoutBuffer.split('\n');
+      stdoutBuffer = lines.pop(); // Re-buffer the incomplete line
       
       for (const line of lines) {
-        // Skip non-JSON lines like YOLO mode warning
+        if (!line.trim()) continue;
+
+        // Skip non-JSON noise
         if (line.includes('YOLO mode is enabled') || line.includes('Loaded cached credentials')) {
           continue;
         }
 
         try {
           const response = JSON.parse(line);
-          console.log('📄 Parsed Gemini JSON:', response);
           
           switch (response.type) {
             case 'init':
@@ -118,10 +176,9 @@ async function spawnGemini(command, options = {}, ws) {
                 capturedSessionId = response.session_id;
                 console.log('📝 Captured session ID:', capturedSessionId);
                 
-                if (processKey !== capturedSessionId) {
-                  activeGeminiProcesses.delete(processKey);
-                  activeGeminiProcesses.set(capturedSessionId, geminiProcess);
-                }
+                // Update process key with real session ID
+                activeGeminiProcesses.set(capturedSessionId, geminiProcess);
+                // Also keep temp key for a while just in case
                 
                 if (ws.setSessionId && typeof ws.setSessionId === 'function') {
                   ws.setSessionId(capturedSessionId);
@@ -154,10 +211,12 @@ async function spawnGemini(command, options = {}, ws) {
                   sessionId: capturedSessionId || sessionId || null
                 });
               } else if (response.role === 'assistant') {
-                const textContent = response.content;
+                const textContent = extractGeminiTextContent(response.content);
+                if (!textContent) {
+                  break;
+                }
                 messageBuffer += textContent;
                 
-                // Map to claude-response for UI compatibility
                 ws.send({
                   type: 'claude-response',
                   data: {
@@ -191,18 +250,14 @@ async function spawnGemini(command, options = {}, ws) {
               break;
 
             case 'tool_result':
-              console.log('✅ Gemini Tool Result:', response.tool_id);
               ws.send({
                 type: 'claude-response',
                 data: {
                   type: 'message_delta',
-                  delta: {
-                    stop_reason: 'tool_use'
-                  }
+                  delta: { stop_reason: 'tool_use' }
                 },
                 sessionId: capturedSessionId || sessionId || null
               });
-              // Forward tool result to UI
               ws.send({
                 type: 'gemini-tool-result',
                 data: response,
@@ -211,14 +266,10 @@ async function spawnGemini(command, options = {}, ws) {
               break;
 
             case 'result':
-              console.log('Gemini session result:', response);
-              
               if (messageBuffer) {
                 ws.send({
                   type: 'claude-response',
-                  data: {
-                    type: 'content_block_stop'
-                  },
+                  data: { type: 'content_block_stop' },
                   sessionId: capturedSessionId || sessionId || null
                 });
               }
@@ -251,29 +302,24 @@ async function spawnGemini(command, options = {}, ws) {
     
     geminiProcess.stderr.on('data', (data) => {
       const stderrText = data.toString();
-      const stderrLines = stderrText
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
+      const actionableError = stderrText.split('\n')
+        .filter(line => line.trim() && !isIgnorableGeminiStderr(line))
+        .join('\n');
 
-      const actionableLines = stderrLines.filter((line) => !isIgnorableGeminiStderr(line));
-      if (actionableLines.length === 0) {
-        return;
+      if (actionableError) {
+        console.error('Gemini CLI stderr:', actionableError);
+        ws.send({
+          type: 'gemini-error',
+          error: actionableError,
+          sessionId: capturedSessionId || sessionId || null
+        });
       }
-
-      const actionableError = actionableLines.join('\n');
-      console.error('Gemini CLI stderr:', actionableError);
-      ws.send({
-        type: 'gemini-error',
-        error: actionableError,
-        sessionId: capturedSessionId || sessionId || null
-      });
     });
     
     geminiProcess.on('close', async (code) => {
       console.log(`Gemini CLI process exited with code ${code}`);
-      const finalSessionId = capturedSessionId || sessionId || processKey;
-      activeGeminiProcesses.delete(finalSessionId);
+      const finalSessionId = capturedSessionId || sessionId || tempKey;
+      removeProcessEntries(geminiProcess);
 
       ws.send({
         type: 'claude-complete',
@@ -282,24 +328,12 @@ async function spawnGemini(command, options = {}, ws) {
         isNewSession: !sessionId && !!command
       });
       
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`Gemini CLI exited with code ${code}`));
-      }
+      resolve();
     });
     
     geminiProcess.on('error', (error) => {
       console.error('Gemini CLI process error:', error);
-      const finalSessionId = capturedSessionId || sessionId || processKey;
-      activeGeminiProcesses.delete(finalSessionId);
-
-      ws.send({
-        type: 'gemini-error',
-        error: error.message,
-        sessionId: capturedSessionId || sessionId || null
-      });
-
+      removeProcessEntries(geminiProcess);
       reject(error);
     });
     
@@ -308,11 +342,51 @@ async function spawnGemini(command, options = {}, ws) {
 }
 
 function abortGeminiSession(sessionId) {
-  const process = activeGeminiProcesses.get(sessionId);
+  // Try to find process by sessionId or any temp key
+  let process = activeGeminiProcesses.get(sessionId);
+  
+  if (!process) {
+    // Search for any temp key that might be associated with this session
+    for (const [key, p] of activeGeminiProcesses.entries()) {
+      if (key.includes(sessionId)) {
+        process = p;
+        break;
+      }
+    }
+  }
+
   if (process) {
     console.log(`🛑 Aborting Gemini session: ${sessionId}`);
     process.kill('SIGTERM');
-    activeGeminiProcesses.delete(sessionId);
+    
+    // Give it a small window to exit gracefully, then SIGKILL
+    setTimeout(() => {
+      try {
+        process.kill('SIGKILL');
+      } catch (e) {}
+    }, 1000);
+
+    removeProcessEntries(process);
+    return true;
+  }
+  
+  console.log(`⚠️  Could not find active process to abort for session: ${sessionId}`);
+  return false;
+}
+
+function abortAnyGeminiSession() {
+  for (const [sessionKey, process] of activeGeminiProcesses.entries()) {
+    if (!process) {
+      continue;
+    }
+    console.log(`🛑 Aborting active Gemini process via fallback key: ${sessionKey}`);
+    process.kill('SIGTERM');
+    setTimeout(() => {
+      try {
+        process.kill('SIGKILL');
+      } catch (_) {}
+    }, 1000);
+    removeProcessEntries(process);
     return true;
   }
   return false;
@@ -329,6 +403,7 @@ function getActiveGeminiSessions() {
 export {
   spawnGemini,
   abortGeminiSession,
+  abortAnyGeminiSession,
   isGeminiSessionActive,
   getActiveGeminiSessions
 };

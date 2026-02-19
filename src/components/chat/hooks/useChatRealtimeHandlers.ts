@@ -200,10 +200,12 @@ export function useChatRealtimeHandlers({
       'claude-complete',
       'codex-complete',
       'cursor-result',
+      'gemini-result',
       'session-aborted',
       'claude-error',
       'cursor-error',
       'codex-error',
+      'gemini-error',
     ]);
 
     const isClaudeSystemInit =
@@ -247,7 +249,8 @@ export function useChatRealtimeHandlers({
       !pendingViewSessionRef.current.sessionId &&
       (latestMessage.type === 'claude-error' ||
         latestMessage.type === 'cursor-error' ||
-        latestMessage.type === 'codex-error');
+        latestMessage.type === 'codex-error' ||
+        latestMessage.type === 'gemini-error');
 
     const handleBackgroundLifecycle = (sessionId?: string) => {
       if (!sessionId) {
@@ -850,6 +853,50 @@ export function useChatRealtimeHandlers({
           console.warn('Error handling cursor-output message:', error);
         }
         break;
+
+      case 'gemini-output':
+        try {
+          const raw = String(latestMessage.data ?? '');
+          const cleaned = raw
+            .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+            .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+            .trim();
+
+          if (cleaned) {
+            streamBufferRef.current += streamBufferRef.current ? `\n${cleaned}` : cleaned;
+            if (!streamTimerRef.current) {
+              streamTimerRef.current = window.setTimeout(() => {
+                const chunk = streamBufferRef.current;
+                streamBufferRef.current = '';
+                streamTimerRef.current = null;
+                appendStreamingChunk(setChatMessages, chunk, true);
+              }, 100);
+            }
+          }
+        } catch (error) {
+          console.warn('Error handling gemini-output message:', error);
+        }
+        break;
+
+      case 'gemini-response': {
+        try {
+          const fallback = toDisplayText(latestMessage.data);
+          if (!fallback.trim()) {
+            break;
+          }
+          setChatMessages((previous) => [
+            ...previous,
+            {
+              type: 'assistant',
+              content: fallback,
+              timestamp: new Date(),
+            },
+          ]);
+        } catch (error) {
+          console.warn('Error handling gemini-response message:', error);
+        }
+        break;
+      }
 
       case 'claude-complete': {
         const pendingSessionId = sessionStorage.getItem('pendingSessionId');
