@@ -40,7 +40,7 @@ export const persistStarredProjects = (starredProjects: Set<string>) => {
 };
 
 export const getSessionDate = (session: SessionWithProvider): Date => {
-  if (session.__provider === 'cursor') {
+  if (session.__provider === 'cursor' || session.__provider === 'gemini') {
     return new Date(session.createdAt || 0);
   }
 
@@ -52,7 +52,7 @@ export const getSessionDate = (session: SessionWithProvider): Date => {
 };
 
 export const getSessionName = (session: SessionWithProvider, t: TFunction): string => {
-  if (session.__provider === 'cursor') {
+  if (session.__provider === 'cursor' || session.__provider === 'gemini') {
     return session.name || t('projects.untitledSession');
   }
 
@@ -64,7 +64,7 @@ export const getSessionName = (session: SessionWithProvider, t: TFunction): stri
 };
 
 export const getSessionTime = (session: SessionWithProvider): string => {
-  if (session.__provider === 'cursor') {
+  if (session.__provider === 'cursor' || session.__provider === 'gemini') {
     return String(session.createdAt || '');
   }
 
@@ -86,6 +86,7 @@ export const createSessionViewModel = (
   return {
     isCursorSession: session.__provider === 'cursor',
     isCodexSession: session.__provider === 'codex',
+    isGeminiSession: session.__provider === 'gemini', // Added this
     isActive: diffInMinutes < 10,
     sessionName: getSessionName(session, t),
     sessionTime: getSessionTime(session),
@@ -112,7 +113,12 @@ export const getAllSessions = (
     __provider: 'codex' as const,
   }));
 
-  return [...claudeSessions, ...cursorSessions, ...codexSessions].sort(
+  const geminiSessions = (project.geminiSessions || []).map((session) => ({
+    ...session,
+    __provider: 'gemini' as const,
+  }));
+
+  return [...claudeSessions, ...cursorSessions, ...codexSessions, ...geminiSessions].sort(
     (a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime(),
   );
 };

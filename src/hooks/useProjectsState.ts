@@ -8,6 +8,7 @@ import type {
   Project,
   ProjectSession,
   ProjectsUpdatedMessage,
+  SessionProvider,
 } from '../types/app';
 
 type UseProjectsStateArgs = {
@@ -52,7 +53,8 @@ const projectsHaveChanges = (
 
     return (
       serialize(nextProject.cursorSessions) !== serialize(prevProject.cursorSessions) ||
-      serialize(nextProject.codexSessions) !== serialize(prevProject.codexSessions)
+      serialize(nextProject.codexSessions) !== serialize(prevProject.codexSessions) ||
+      serialize(nextProject.geminiSessions) !== serialize(prevProject.geminiSessions)
     );
   });
 };
@@ -62,7 +64,34 @@ const getProjectSessions = (project: Project): ProjectSession[] => {
     ...(project.sessions ?? []),
     ...(project.codexSessions ?? []),
     ...(project.cursorSessions ?? []),
+    ...(project.geminiSessions ?? []),
   ];
+};
+
+const resolveSessionProvider = (
+  latestMessage: AppSocketMessage,
+): SessionProvider | null => {
+  const provider = latestMessage.provider;
+  if (
+    provider === 'claude' ||
+    provider === 'cursor' ||
+    provider === 'codex' ||
+    provider === 'gemini'
+  ) {
+    return provider;
+  }
+
+  const selected = localStorage.getItem('selected-provider');
+  if (
+    selected === 'claude' ||
+    selected === 'cursor' ||
+    selected === 'codex' ||
+    selected === 'gemini'
+  ) {
+    return selected;
+  }
+
+  return null;
 };
 
 const isUpdateAdditive = (
@@ -162,6 +191,94 @@ export function useProjectsState({
 
   useEffect(() => {
     if (!latestMessage) {
+      return;
+    }
+
+    if (latestMessage.type === 'session-created') {
+      const sessionId =
+        typeof latestMessage.sessionId === 'string' ? latestMessage.sessionId : null;
+      const provider = resolveSessionProvider(latestMessage);
+      const sessionCwd =
+        typeof latestMessage.cwd === 'string' ? latestMessage.cwd : null;
+
+      if (!sessionId || !provider) {
+        return;
+      }
+      setProjects((prevProjects) => {
+        const nowIso = new Date().toISOString();
+        const targetProject = prevProjects.find((project) => {
+          if (selectedProject?.name && project.name === selectedProject.name) {
+            return true;
+          }
+          if (!sessionCwd) {
+            return false;
+          }
+          return (
+            project.fullPath === sessionCwd ||
+            project.path === sessionCwd
+          );
+        });
+
+        if (!targetProject) {
+          return prevProjects;
+        }
+
+        const targetSessions =
+          provider === 'cursor'
+            ? targetProject.cursorSessions ?? []
+            : provider === 'codex'
+            ? targetProject.codexSessions ?? []
+            : provider === 'gemini'
+            ? targetProject.geminiSessions ?? []
+            : targetProject.sessions ?? [];
+
+        if (targetSessions.some((session) => session.id === sessionId)) {
+          return prevProjects;
+        }
+
+        const optimisticSession: ProjectSession = {
+          id: sessionId,
+          name:
+            provider === 'cursor' || provider === 'gemini'
+              ? 'New Session'
+              : undefined,
+          summary: provider === 'codex' ? 'New Session' : undefined,
+          createdAt: nowIso,
+          created_at: nowIso,
+          lastActivity: nowIso,
+          messageCount: 0,
+        };
+
+        return prevProjects.map((project) => {
+          if (project.name !== targetProject.name) {
+            return project;
+          }
+
+          if (provider === 'cursor') {
+            return {
+              ...project,
+              cursorSessions: [optimisticSession, ...(project.cursorSessions ?? [])],
+            };
+          }
+          if (provider === 'codex') {
+            return {
+              ...project,
+              codexSessions: [optimisticSession, ...(project.codexSessions ?? [])],
+            };
+          }
+          if (provider === 'gemini') {
+            return {
+              ...project,
+              geminiSessions: [optimisticSession, ...(project.geminiSessions ?? [])],
+            };
+          }
+          return {
+            ...project,
+            sessions: [optimisticSession, ...(project.sessions ?? [])],
+          };
+        });
+      });
+
       return;
     }
 
@@ -321,6 +438,24 @@ export function useProjectsState({
         }
         return;
       }
+
+      const geminiSession = project.geminiSessions?.find((session) => session.id === sessionId);
+      if (geminiSession) {
+        const shouldUpdateProject = selectedProject?.name !== project.name;
+        const shouldUpdateSession =
+          selectedSession?.id !== sessionId || selectedSession.__provider !== 'gemini';
+
+        if (shouldUpdateProject) {
+          setSelectedProject(project);
+        }
+        if (shouldUpdateSession) {
+          setSelectedSession({ ...geminiSession, __provider: 'gemini' });
+        }
+        if (shouldSwitchTab) {
+          setActiveTab('chat');
+        }
+        return;
+      }
     }
   }, [sessionId, projects, selectedProject?.name, selectedSession?.id, selectedSession?.__provider]);
 
@@ -389,6 +524,9 @@ export function useProjectsState({
         prevProjects.map((project) => ({
           ...project,
           sessions: project.sessions?.filter((session) => session.id !== sessionIdToDelete) ?? [],
+          codexSessions: project.codexSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [],
+          cursorSessions: project.cursorSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [],
+          geminiSessions: project.geminiSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [],
           sessionMeta: {
             ...project.sessionMeta,
             total: Math.max(0, (project.sessionMeta?.total as number | undefined ?? 0) - 1),

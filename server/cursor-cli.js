@@ -105,6 +105,7 @@ async function spawnCursor(command, options = {}, ws) {
                     ws.send({
                       type: 'session-created',
                       sessionId: capturedSessionId,
+                      provider: 'cursor',
                       model: response.model,
                       cwd: response.cwd
                     });

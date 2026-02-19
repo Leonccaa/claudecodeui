@@ -261,7 +261,7 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
 
   const sessionDisplayName = useMemo(() => {
     if (!selectedSession) return null;
-    return selectedSession.__provider === 'cursor'
+    return (selectedSession.__provider === 'cursor' || selectedSession.__provider === 'gemini')
       ? (selectedSession.name || 'Untitled Session')
       : (selectedSession.summary || 'New Session');
   }, [selectedSession]);

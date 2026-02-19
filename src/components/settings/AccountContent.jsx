@@ -32,6 +32,15 @@ const agentConfig = {
     subtextClass: 'text-gray-700 dark:text-gray-300',
     buttonClass: 'bg-gray-800 hover:bg-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600',
   },
+  gemini: {
+    name: 'Gemini',
+    description: 'Google Gemini AI assistant',
+    bgClass: 'bg-blue-50 dark:bg-blue-900/20',
+    borderClass: 'border-blue-200 dark:border-blue-800',
+    textClass: 'text-blue-900 dark:text-blue-100',
+    subtextClass: 'text-blue-700 dark:text-blue-300',
+    buttonClass: 'bg-blue-600 hover:bg-blue-700',
+  },
 };
 
 export default function AccountContent({ agent, authStatus, onLogin }) {

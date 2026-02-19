@@ -65,6 +65,7 @@ import crypto from 'crypto';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import os from 'os';
+import { getGeminiSessions } from './gemini-utils.js';
 
 // Import TaskMaster detection functions
 async function detectTaskMasterFolder(projectPath) {
@@ -475,6 +476,14 @@ async function getProjects(progressCallback = null) {
           project.codexSessions = [];
         }
 
+        // Also fetch Gemini sessions for this project
+        try {
+          project.geminiSessions = await getGeminiSessions(actualProjectDir);
+        } catch (e) {
+          console.warn(`Could not load Gemini sessions for project ${entry.name}:`, e.message);
+          project.geminiSessions = [];
+        }
+
         // Add TaskMaster detection
         try {
           const taskMasterResult = await detectTaskMasterFolder(actualProjectDir);
@@ -547,7 +556,8 @@ async function getProjects(progressCallback = null) {
             total: 0
           },
           cursorSessions: [],
-          codexSessions: []
+          codexSessions: [],
+          geminiSessions: []
       };
 
       // Try to fetch Cursor sessions for manual projects too
@@ -564,6 +574,13 @@ async function getProjects(progressCallback = null) {
         });
       } catch (e) {
         console.warn(`Could not load Codex sessions for manual project ${projectName}:`, e.message);
+      }
+
+      // Try to fetch Gemini sessions for manual projects too
+      try {
+        project.geminiSessions = await getGeminiSessions(actualProjectDir);
+      } catch (e) {
+        console.warn(`Could not load Gemini sessions for manual project ${projectName}:`, e.message);
       }
 
       // Add TaskMaster detection for manual projects
@@ -963,13 +980,22 @@ async function getSessionMessages(projectName, sessionId, limit = null, offset =
 // Rename a project's display name
 async function renameProject(projectName, newDisplayName) {
   const config = await loadProjectConfig();
+  const existing = config[projectName] || {};
   
   if (!newDisplayName || newDisplayName.trim() === '') {
-    // Remove custom name if empty, will fall back to auto-generated
-    delete config[projectName];
+    // Only clear displayName; keep tracking metadata (e.g. manuallyAdded/originalPath).
+    if (config[projectName]) {
+      const { displayName, ...rest } = config[projectName];
+      if (Object.keys(rest).length === 0) {
+        delete config[projectName];
+      } else {
+        config[projectName] = rest;
+      }
+    }
   } else {
-    // Set custom display name
+    // Preserve existing metadata and update only displayName.
     config[projectName] = {
+      ...existing,
       displayName: newDisplayName.trim()
     };
   }
@@ -1117,7 +1143,37 @@ async function addProjectManually(projectPath, displayName = null) {
   const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
 
   if (config[projectName]) {
-    throw new Error(`Project already configured for path: ${absolutePath}`);
+    // Recover partially configured entries (e.g. displayName-only records).
+    const existing = config[projectName];
+    const isAlreadyTracked =
+      existing.manuallyAdded === true &&
+      (typeof existing.originalPath !== 'string' || path.resolve(existing.originalPath) === absolutePath);
+
+    if (!isAlreadyTracked) {
+      config[projectName] = {
+        ...existing,
+        manuallyAdded: true,
+        originalPath: absolutePath
+      };
+
+      if (displayName) {
+        config[projectName].displayName = displayName;
+      }
+
+      await saveProjectConfig(config);
+    }
+
+    return {
+      name: projectName,
+      path: absolutePath,
+      fullPath: absolutePath,
+      displayName: (displayName || config[projectName].displayName) || await generateDisplayName(projectName, absolutePath),
+      isManuallyAdded: true,
+      sessions: [],
+      cursorSessions: [],
+      codexSessions: [],
+      geminiSessions: []
+    };
   }
 
   // Allow adding projects even if the directory exists - this enables tracking
@@ -1143,7 +1199,9 @@ async function addProjectManually(projectPath, displayName = null) {
     displayName: displayName || await generateDisplayName(projectName, absolutePath),
     isManuallyAdded: true,
     sessions: [],
-    cursorSessions: []
+    cursorSessions: [],
+    codexSessions: [],
+    geminiSessions: []
   };
 }
 

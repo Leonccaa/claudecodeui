@@ -55,8 +55,13 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
   const [mcpToolsLoading, setMcpToolsLoading] = useState({});
   const [activeTab, setActiveTab] = useState(initialTab);
   const [jsonValidationError, setJsonValidationError] = useState('');
-  const [selectedAgent, setSelectedAgent] = useState('claude'); // 'claude', 'cursor', or 'codex'
+  const [selectedAgent, setSelectedAgent] = useState('claude'); // 'claude', 'cursor', 'codex', or 'gemini'
   const [selectedCategory, setSelectedCategory] = useState('account'); // 'account', 'permissions', or 'mcp'
+  const [geminiAuthStatus, setGeminiAuthStatus] = useState({
+    authenticated: true,
+    user: null,
+    loading: false
+  });
 
   // Code Editor settings
   const [codeEditorTheme, setCodeEditorTheme] = useState(() =>
@@ -79,6 +84,9 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
   const [cursorAllowedCommands, setCursorAllowedCommands] = useState([]);
   const [cursorDisallowedCommands, setCursorDisallowedCommands] = useState([]);
   const [cursorSkipPermissions, setCursorSkipPermissions] = useState(false);
+  const [geminiSkipPermissions, setGeminiSkipPermissions] = useState(() =>
+    localStorage.getItem('gemini-skip-permissions') === 'true'
+  );
   const [newCursorCommand, setNewCursorCommand] = useState('');
   const [newCursorDisallowedCommand, setNewCursorDisallowedCommand] = useState('');
   const [cursorMcpServers, setCursorMcpServers] = useState([]);
@@ -1278,6 +1286,13 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
                       onClick={() => setSelectedAgent('codex')}
                       isMobile={true}
                     />
+                    <AgentListItem
+                      agentId="gemini"
+                      authStatus={geminiAuthStatus}
+                      isSelected={selectedAgent === 'gemini'}
+                      onClick={() => setSelectedAgent('gemini')}
+                      isMobile={true}
+                    />
                   </div>
                 </div>
 
@@ -1301,6 +1316,12 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
                       authStatus={codexAuthStatus}
                       isSelected={selectedAgent === 'codex'}
                       onClick={() => setSelectedAgent('codex')}
+                    />
+                    <AgentListItem
+                      agentId="gemini"
+                      authStatus={geminiAuthStatus}
+                      isSelected={selectedAgent === 'gemini'}
+                      onClick={() => setSelectedAgent('gemini')}
                     />
                   </div>
                 </div>
@@ -1352,11 +1373,13 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
                         authStatus={
                           selectedAgent === 'claude' ? claudeAuthStatus :
                           selectedAgent === 'cursor' ? cursorAuthStatus :
+                          selectedAgent === 'gemini' ? geminiAuthStatus :
                           codexAuthStatus
                         }
                         onLogin={
                           selectedAgent === 'claude' ? handleClaudeLogin :
                           selectedAgent === 'cursor' ? handleCursorLogin :
+                          selectedAgent === 'gemini' ? () => alert('Gemini CLI handles authentication via "gemini login" command in your terminal.') :
                           handleCodexLogin
                         }
                       />
@@ -1400,6 +1423,17 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
                         agent="codex"
                         permissionMode={codexPermissionMode}
                         setPermissionMode={setCodexPermissionMode}
+                      />
+                    )}
+
+                    {selectedCategory === 'permissions' && selectedAgent === 'gemini' && (
+                      <PermissionsContent
+                        agent="gemini"
+                        skipPermissions={geminiSkipPermissions}
+                        setSkipPermissions={(val) => {
+                          setGeminiSkipPermissions(val);
+                          localStorage.setItem('gemini-skip-permissions', val);
+                        }}
                       />
                     )}
 

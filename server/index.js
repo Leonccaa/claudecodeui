@@ -45,11 +45,13 @@ import mime from 'mime-types';
 import { getProjects, getSessions, getSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
+import { spawnGemini, abortGeminiSession, isGeminiSessionActive, getActiveGeminiSessions } from './gemini-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
 import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
 import mcpRoutes from './routes/mcp.js';
 import cursorRoutes from './routes/cursor.js';
+import geminiRoutes from './routes/gemini.js';
 import taskmasterRoutes from './routes/taskmaster.js';
 import mcpUtilsRoutes from './routes/mcp-utils.js';
 import commandsRoutes from './routes/commands.js';
@@ -67,7 +69,8 @@ import { IS_PLATFORM } from './constants/config.js';
 const PROVIDER_WATCH_PATHS = [
     { provider: 'claude', rootPath: path.join(os.homedir(), '.claude', 'projects') },
     { provider: 'cursor', rootPath: path.join(os.homedir(), '.cursor', 'chats') },
-    { provider: 'codex', rootPath: path.join(os.homedir(), '.codex', 'sessions') }
+    { provider: 'codex', rootPath: path.join(os.homedir(), '.codex', 'sessions') },
+    { provider: 'gemini', rootPath: path.join(os.homedir(), '.gemini', 'tmp') }
 ];
 const WATCHER_IGNORED_PATTERNS = [
     '**/node_modules/**',
@@ -83,6 +86,7 @@ let projectsWatchers = [];
 let projectsWatcherDebounceTimer = null;
 const connectedClients = new Set();
 let isGetProjectsRunning = false; // Flag to prevent reentrant calls
+let pendingProjectUpdate = null;
 
 // Broadcast progress to all connected WebSocket clients
 function broadcastProgress(progress) {
@@ -125,6 +129,7 @@ async function setupProjectsWatcher() {
         projectsWatcherDebounceTimer = setTimeout(async () => {
             // Prevent reentrant calls
             if (isGetProjectsRunning) {
+                pendingProjectUpdate = { eventType, filePath, provider, rootPath };
                 return;
             }
 
@@ -157,6 +162,16 @@ async function setupProjectsWatcher() {
                 console.error('[ERROR] Error handling project changes:', error);
             } finally {
                 isGetProjectsRunning = false;
+                if (pendingProjectUpdate) {
+                    const queuedUpdate = pendingProjectUpdate;
+                    pendingProjectUpdate = null;
+                    debouncedUpdate(
+                        queuedUpdate.eventType,
+                        queuedUpdate.filePath,
+                        queuedUpdate.provider,
+                        queuedUpdate.rootPath
+                    );
+                }
             }
         }, WATCHER_DEBOUNCE_MS);
     };
@@ -354,6 +369,9 @@ app.use('/api/mcp', authenticateToken, mcpRoutes);
 
 // Cursor API Routes (protected)
 app.use('/api/cursor', authenticateToken, cursorRoutes);
+
+// Gemini API Routes (protected)
+app.use('/api/gemini', authenticateToken, geminiRoutes);
 
 // TaskMaster API Routes (protected)
 app.use('/api/taskmaster', authenticateToken, taskmasterRoutes);
@@ -943,6 +961,12 @@ function handleChatConnection(ws) {
                 console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
                 console.log('🤖 Model:', data.options?.model || 'default');
                 await spawnCursor(data.command, data.options, writer);
+            } else if (data.type === 'gemini-command') {
+                console.log('[DEBUG] Gemini message:', data.command || '[Continue/Resume]');
+                console.log('📁 Project:', data.options?.cwd || 'Unknown');
+                console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
+                console.log('🤖 Model:', data.options?.model || 'default');
+                await spawnGemini(data.command, data.options, writer);
             } else if (data.type === 'codex-command') {
                 console.log('[DEBUG] Codex message:', data.command || '[Continue/Resume]');
                 console.log('📁 Project:', data.options?.projectPath || data.options?.cwd || 'Unknown');
@@ -957,6 +981,13 @@ function handleChatConnection(ws) {
                     resume: true,
                     cwd: data.options?.cwd
                 }, writer);
+            } else if (data.type === 'gemini-resume') {
+                console.log('[DEBUG] Gemini resume session:', data.sessionId);
+                await spawnGemini('', {
+                    sessionId: data.sessionId,
+                    resume: true,
+                    cwd: data.options?.cwd
+                }, writer);
             } else if (data.type === 'abort-session') {
                 console.log('[DEBUG] Abort session request:', data.sessionId);
                 const provider = data.provider || 'claude';
@@ -964,6 +995,8 @@ function handleChatConnection(ws) {
 
                 if (provider === 'cursor') {
                     success = abortCursorSession(data.sessionId);
+                } else if (provider === 'gemini') {
+                    success = abortGeminiSession(data.sessionId);
                 } else if (provider === 'codex') {
                     success = abortCodexSession(data.sessionId);
                 } else {
@@ -1006,6 +1039,8 @@ function handleChatConnection(ws) {
 
                 if (provider === 'cursor') {
                     isActive = isCursorSessionActive(sessionId);
+                } else if (provider === 'gemini') {
+                    isActive = isGeminiSessionActive(sessionId);
                 } else if (provider === 'codex') {
                     isActive = isCodexSessionActive(sessionId);
                 } else {
@@ -1024,6 +1059,7 @@ function handleChatConnection(ws) {
                 const activeSessions = {
                     claude: getActiveClaudeSDKSessions(),
                     cursor: getActiveCursorSessions(),
+                    gemini: getActiveGeminiSessions(),
                     codex: getActiveCodexSessions()
                 };
                 writer.send({

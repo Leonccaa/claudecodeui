@@ -374,6 +374,20 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
   });
 
   rawMessages.forEach((message) => {
+    // Compatibility path for providers (e.g. Gemini) that return flattened records:
+    // { type: "user" | "assistant", content: string, timestamp?: string }
+    if (!message?.message && (message?.type === 'user' || message?.type === 'assistant')) {
+      const flatContent = typeof message.content === 'string' ? message.content : '';
+      if (flatContent.trim()) {
+        converted.push({
+          type: message.type,
+          content: unescapeWithMathProtection(flatContent),
+          timestamp: message.timestamp || new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
     if (message.message?.role === 'user' && message.message?.content) {
       let content = '';
       if (Array.isArray(message.message.content)) {

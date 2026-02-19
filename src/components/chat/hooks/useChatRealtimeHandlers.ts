@@ -91,6 +91,65 @@ const finalizeStreamingMessage = (setChatMessages: Dispatch<SetStateAction<ChatM
   });
 };
 
+const toDisplayText = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
+
+const extractGeminiToolResultText = (payload: any): string => {
+  if (!payload) {
+    return '';
+  }
+
+  const deepOutputCandidates: string[] = [];
+
+  if (Array.isArray(payload.result)) {
+    const textFromArray = payload.result
+      .map((item: any) => item?.functionResponse?.response?.output || item?.output || '')
+      .filter(Boolean)
+      .join('\n');
+    if (textFromArray) {
+      deepOutputCandidates.push(textFromArray);
+    }
+  }
+
+  const directOutput = payload?.functionResponse?.response?.output
+    || payload?.response?.output
+    || payload?.output
+    || payload?.result?.output
+    || payload?.tool_result?.output;
+  if (typeof directOutput === 'string' && directOutput.trim()) {
+    deepOutputCandidates.push(directOutput);
+  }
+
+  if (deepOutputCandidates.length > 0) {
+    return deepOutputCandidates.join('\n');
+  }
+
+  if (typeof payload.output === 'string') {
+    return payload.output;
+  }
+
+  if (typeof payload.resultDisplay === 'string' && payload.resultDisplay.trim()) {
+    return payload.resultDisplay;
+  }
+
+  if (typeof payload.result === 'string') {
+    return payload.result;
+  }
+
+  return toDisplayText(payload.result ?? payload);
+};
+
 export function useChatRealtimeHandlers({
   latestMessage,
   provider,
@@ -159,16 +218,28 @@ export function useChatRealtimeHandlers({
       rawStructuredData.type === 'system' &&
       rawStructuredData.subtype === 'init';
 
+    const isGeminiSystemInit =
+      latestMessage.type === 'gemini-system' &&
+      rawStructuredData &&
+      rawStructuredData.type === 'init' &&
+      Boolean(rawStructuredData.session_id);
+
     const systemInitSessionId = isClaudeSystemInit
       ? structuredMessageData?.session_id
       : isCursorSystemInit
       ? rawStructuredData?.session_id
+      : isGeminiSystemInit
+      ? rawStructuredData?.session_id
       : null;
 
-    const activeViewSessionId =
-      selectedSession?.id || currentSessionId || pendingViewSessionRef.current?.sessionId || null;
+    const hasPendingUnboundSession =
+      Boolean(pendingViewSessionRef.current) && pendingViewSessionRef.current?.sessionId === null;
+    const activeViewSessionId = hasPendingUnboundSession
+      ? null
+      : selectedSession?.id || currentSessionId || pendingViewSessionRef.current?.sessionId || null;
     const isSystemInitForView =
-      systemInitSessionId && (!activeViewSessionId || systemInitSessionId === activeViewSessionId);
+      systemInitSessionId &&
+      (hasPendingUnboundSession || !activeViewSessionId || systemInitSessionId === activeViewSessionId);
     const shouldBypassSessionFilter = isGlobalMessage || Boolean(isSystemInitForView);
     const isUnscopedError =
       !latestMessage.sessionId &&
@@ -237,7 +308,7 @@ export function useChatRealtimeHandlers({
 
     switch (latestMessage.type) {
       case 'session-created':
-        if (latestMessage.sessionId && !currentSessionId) {
+        if (latestMessage.sessionId && (!currentSessionId || hasPendingUnboundSession)) {
           sessionStorage.setItem('pendingSessionId', latestMessage.sessionId);
           if (pendingViewSessionRef.current && !pendingViewSessionRef.current.sessionId) {
             pendingViewSessionRef.current.sessionId = latestMessage.sessionId;
@@ -285,6 +356,24 @@ export function useChatRealtimeHandlers({
             streamBufferRef.current = '';
             appendStreamingChunk(setChatMessages, chunk, false);
             finalizeStreamingMessage(setChatMessages);
+            return;
+          }
+
+          if (messageData.type === 'content_block_start' && messageData.content_block?.type === 'tool_use') {
+            const tool = messageData.content_block;
+            setChatMessages((previous) => [
+              ...previous,
+              {
+                type: 'assistant',
+                content: '',
+                timestamp: new Date(),
+                isToolUse: true,
+                toolName: tool.name || 'Tool',
+                toolInput: toDisplayText(tool.input),
+                toolId: tool.id,
+                toolResult: null,
+              },
+            ]);
             return;
           }
         }
@@ -532,8 +621,126 @@ export function useChatRealtimeHandlers({
         }
         break;
 
+      case 'gemini-system': {
+        try {
+          const geminiData = latestMessage.data;
+          if (geminiData && geminiData.type === 'init' && geminiData.session_id) {
+            if (!isSystemInitForView) { return; }
+            if (currentSessionId && geminiData.session_id !== currentSessionId) {
+              setIsSystemSessionChange(true);
+              onNavigateToSession?.(geminiData.session_id);
+              return;
+            }
+            if (!currentSessionId) {
+              setIsSystemSessionChange(true);
+              onNavigateToSession?.(geminiData.session_id);
+              return;
+            }
+          }
+        } catch (error) {
+          console.warn('Error handling gemini-system message:', error);
+        }
+        break;
+      }
+
       case 'cursor-user':
         break;
+      
+      case 'gemini-user':
+        break;
+      
+      case 'gemini-tool-result':
+        setChatMessages((previous) => {
+          const toolResultData = latestMessage.data || {};
+          const targetToolId = toolResultData.tool_id || toolResultData.toolId;
+          const resultText = extractGeminiToolResultText(toolResultData);
+          const isError = String(toolResultData.status || '').toLowerCase() === 'error';
+
+          let matched = false;
+          const updated = previous.map((message) => {
+            if (!message.isToolUse || message.toolResult) {
+              return message;
+            }
+            if (targetToolId && message.toolId !== targetToolId) {
+              return message;
+            }
+            matched = true;
+            return {
+              ...message,
+              toolResult: {
+                content: resultText,
+                isError,
+                timestamp: new Date(),
+                toolUseResult: toolResultData,
+              },
+            };
+          });
+
+          if (matched) {
+            return updated;
+          }
+
+          const fallback = [...updated];
+          for (let index = fallback.length - 1; index >= 0; index -= 1) {
+            const msg = fallback[index];
+            if (msg.isToolUse && !msg.toolResult) {
+              fallback[index] = {
+                ...msg,
+                toolResult: {
+                  content: resultText,
+                  isError,
+                  timestamp: new Date(),
+                  toolUseResult: toolResultData,
+                },
+              };
+              return fallback;
+            }
+          }
+          return fallback;
+        });
+        break;
+      
+      case 'gemini-error':
+        clearLoadingIndicators();
+        markSessionsAsCompleted(
+          latestMessage.sessionId || currentSessionId,
+          currentSessionId,
+          selectedSession?.id,
+          typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null,
+        );
+        setChatMessages((previous) => [
+          ...previous,
+          {
+            type: 'error',
+            content: `Gemini error: ${latestMessage.error || 'Unknown error'}`,
+            timestamp: new Date(),
+          },
+        ]);
+        break;
+        
+      case 'gemini-result': {
+        const geminiCompletedSessionId = latestMessage.sessionId || currentSessionId;
+        const pendingGeminiSessionId = sessionStorage.getItem('pendingSessionId');
+
+        clearLoadingIndicators();
+        markSessionsAsCompleted(
+          geminiCompletedSessionId,
+          currentSessionId,
+          selectedSession?.id,
+          pendingGeminiSessionId,
+        );
+
+        if (
+          geminiCompletedSessionId &&
+          !currentSessionId &&
+          geminiCompletedSessionId === pendingGeminiSessionId
+        ) {
+          setCurrentSessionId(geminiCompletedSessionId);
+          sessionStorage.removeItem('pendingSessionId');
+          console.log('Gemini session complete, ID set to:', geminiCompletedSessionId);
+        }
+        break;
+      }
 
       case 'cursor-tool-use':
         setChatMessages((previous) => [

@@ -62,6 +62,10 @@ export const api = {
       url = `/api/codex/sessions/${sessionId}/messages${queryString ? `?${queryString}` : ''}`;
     } else if (provider === 'cursor') {
       url = `/api/cursor/sessions/${sessionId}/messages${queryString ? `?${queryString}` : ''}`;
+    } else if (provider === 'gemini') {
+      params.append('projectPath', projectName);
+      const geminiQueryString = params.toString();
+      url = `/api/gemini/sessions/${sessionId}/messages?${geminiQueryString}`;
     } else {
       url = `/api/projects/${projectName}/sessions/${sessionId}/messages${queryString ? `?${queryString}` : ''}`;
     }
@@ -80,6 +84,16 @@ export const api = {
     authenticatedFetch(`/api/codex/sessions/${sessionId}`, {
       method: 'DELETE',
     }),
+  deleteGeminiSession: (sessionId, projectPath) => {
+    const params = new URLSearchParams();
+    if (projectPath) {
+      params.append('projectPath', projectPath);
+    }
+
+    return authenticatedFetch(`/api/gemini/sessions/${sessionId}${params.toString() ? `?${params.toString()}` : ''}`, {
+      method: 'DELETE',
+    });
+  },
   deleteProject: (projectName, force = false) =>
     authenticatedFetch(`/api/projects/${projectName}${force ? '?force=true' : ''}`, {
       method: 'DELETE',

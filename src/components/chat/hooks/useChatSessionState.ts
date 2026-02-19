@@ -123,6 +123,8 @@ export function useChatSessionState({
         }
 
         const data = await response.json();
+        console.log('📥 Received session messages:', data); // DEBUG LOG
+
         if (isInitialLoad && data.tokenUsage) {
           setTokenBudget(data.tokenUsage);
         }
@@ -182,6 +184,21 @@ export function useChatSessionState({
     return convertSessionMessages(sessionMessages);
   }, [sessionMessages]);
 
+  const getProjectRequestKey = useCallback(
+    (provider: Provider | string) => {
+      if (!selectedProject) {
+        return '';
+      }
+
+      if (provider === 'gemini') {
+        return selectedProject.fullPath || selectedProject.path || selectedProject.name;
+      }
+
+      return selectedProject.name;
+    },
+    [selectedProject],
+  );
+
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) {
@@ -229,7 +246,7 @@ export function useChatSessionState({
 
       try {
         const moreMessages = await loadSessionMessages(
-          selectedProject.name,
+          getProjectRequestKey(sessionProvider),
           selectedSession.id,
           true,
           sessionProvider,
@@ -251,7 +268,7 @@ export function useChatSessionState({
         isLoadingMoreRef.current = false;
       }
     },
-    [hasMoreMessages, isLoadingMoreMessages, loadSessionMessages, selectedProject, selectedSession],
+    [getProjectRequestKey, hasMoreMessages, isLoadingMoreMessages, loadSessionMessages, selectedProject, selectedSession],
   );
 
   const handleScroll = useCallback(async () => {
@@ -324,7 +341,7 @@ export function useChatSessionState({
   useEffect(() => {
     const loadMessages = async () => {
       if (selectedSession && selectedProject) {
-        const provider = (localStorage.getItem('selected-provider') as Provider) || 'claude';
+        const provider = selectedSession.__provider || (localStorage.getItem('selected-provider') as Provider) || 'claude';
         isLoadingSessionRef.current = true;
 
         const sessionChanged = currentSessionId !== null && currentSessionId !== selectedSession.id;
@@ -390,7 +407,7 @@ export function useChatSessionState({
 
           if (!isSystemSessionChange) {
             const messages = await loadSessionMessages(
-              selectedProject.name,
+              getProjectRequestKey(selectedSession.__provider || 'claude'),
               selectedSession.id,
               false,
               selectedSession.__provider || 'claude',
@@ -436,6 +453,7 @@ export function useChatSessionState({
     selectedSession,
     sendMessage,
     ws,
+    getProjectRequestKey,
   ]);
 
   useEffect(() => {
@@ -456,7 +474,7 @@ export function useChatSessionState({
         }
 
         const messages = await loadSessionMessages(
-          selectedProject.name,
+          getProjectRequestKey(selectedSession.__provider || 'claude'),
           selectedSession.id,
           false,
           selectedSession.__provider || 'claude',
@@ -482,6 +500,7 @@ export function useChatSessionState({
     scrollToBottom,
     selectedProject,
     selectedSession,
+    getProjectRequestKey,
   ]);
 
   useEffect(() => {
@@ -650,7 +669,7 @@ export function useChatSessionState({
 
     try {
       const response = await (api.sessionMessages as any)(
-        selectedProject.name,
+        getProjectRequestKey(sessionProvider),
         requestSessionId,
         null,
         0,
@@ -696,7 +715,7 @@ export function useChatSessionState({
       isLoadingMoreRef.current = false;
       setIsLoadingAllMessages(false);
     }
-  }, [selectedSession, selectedProject, isLoadingAllMessages, currentSessionId]);
+  }, [selectedSession, selectedProject, isLoadingAllMessages, currentSessionId, getProjectRequestKey]);
 
   const loadEarlierMessages = useCallback(() => {
     setVisibleMessageCount((previousCount) => previousCount + 100);

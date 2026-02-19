@@ -10,7 +10,8 @@
     "tool": "Tool",
     "claude": "Claude",
     "cursor": "Cursor",
-    "codex": "Codex"
+    "codex": "Codex",
+    "gemini": "Gemini"
   },
   "tools": {
     "settings": "Tool Settings",
@@ -153,11 +154,13 @@
     "providerInfo": {
       "anthropic": "by Anthropic",
       "openai": "by OpenAI",
+      "google": "by Google",
       "cursorEditor": "AI Code Editor"
     },
     "readyPrompt": {
       "claude": "Ready to use Claude with {{model}}. Start typing your message below.",
       "cursor": "Ready to use Cursor with {{model}}. Start typing your message below.",
+      "gemini": "Ready to use Gemini with {{model}}. Start typing your message below.",
       "codex": "Ready to use Codex with {{model}}. Start typing your message below.",
       "default": "Select a provider above to begin"
     }

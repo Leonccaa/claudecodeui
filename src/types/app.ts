@@ -1,4 +1,4 @@
-export type SessionProvider = 'claude' | 'cursor' | 'codex';
+export type SessionProvider = 'claude' | 'cursor' | 'codex' | 'gemini'; // Still need 'gemini' for logo/name
 
 export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'tasks' | 'preview';
 
@@ -38,6 +38,7 @@ export interface Project {
   sessions?: ProjectSession[];
   cursorSessions?: ProjectSession[];
   codexSessions?: ProjectSession[];
+  geminiSessions?: ProjectSession[];
   sessionMeta?: ProjectSessionMeta;
   taskmaster?: ProjectTaskmasterInfo;
   [key: string]: unknown;

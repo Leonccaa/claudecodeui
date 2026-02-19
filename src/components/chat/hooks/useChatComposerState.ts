@@ -41,6 +41,7 @@ interface UseChatComposerStateArgs {
   cursorModel: string;
   claudeModel: string;
   codexModel: string;
+  geminiModel: string;
   isLoading: boolean;
   canAbortSession: boolean;
   tokenBudget: Record<string, unknown> | null;
@@ -92,6 +93,7 @@ export function useChatComposerState({
   cursorModel,
   claudeModel,
   codexModel,
+  geminiModel,
   isLoading,
   canAbortSession,
   tokenBudget,
@@ -533,8 +535,11 @@ export function useChatComposerState({
       setIsUserScrolledUp(false);
       setTimeout(() => scrollToBottom(), 100);
 
-      const effectiveSessionId =
-        currentSessionId || selectedSession?.id || sessionStorage.getItem('cursorSessionId');
+      // If no session is selected (e.g. after clicking "+ New Session"), force a new session.
+      // This avoids a race where stale currentSessionId could accidentally resume the previous thread.
+      const effectiveSessionId = selectedSession?.id
+        ? (currentSessionId || selectedSession.id || sessionStorage.getItem('cursorSessionId'))
+        : null;
       const sessionToActivate = effectiveSessionId || `new-session-${Date.now()}`;
 
       if (!effectiveSessionId && !selectedSession?.id) {
@@ -601,6 +606,25 @@ export function useChatComposerState({
             permissionMode: permissionMode === 'plan' ? 'default' : permissionMode,
           },
         });
+      } else if (provider === 'gemini') {
+        const geminiSkipPermissions = localStorage.getItem('gemini-skip-permissions') === 'true';
+        sendMessage({
+          type: 'gemini-command',
+          command: messageContent,
+          sessionId: effectiveSessionId,
+          options: {
+            cwd: resolvedProjectPath,
+            projectPath: resolvedProjectPath,
+            sessionId: effectiveSessionId,
+            resume: Boolean(effectiveSessionId),
+            model: geminiModel,
+            skipPermissions: geminiSkipPermissions,
+            toolsSettings: {
+              ...toolsSettings,
+              skipPermissions: geminiSkipPermissions
+            },
+          },
+        });
       } else {
         sendMessage({
           type: 'claude-command',
@@ -637,6 +661,7 @@ export function useChatComposerState({
       attachedImages,
       claudeModel,
       codexModel,
+      geminiModel,
       currentSessionId,
       cursorModel,
       isLoading,

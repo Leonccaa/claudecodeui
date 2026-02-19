@@ -597,6 +597,41 @@ function CodexPermissions({ permissionMode, setPermissionMode }) {
   );
 }
 
+// Gemini Permissions
+function GeminiPermissions({ skipPermissions, setSkipPermissions }) {
+  const { t } = useTranslation('settings');
+  return (
+    <div className="space-y-6">
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-orange-500" />
+          <h3 className="text-lg font-medium text-foreground">
+            {t('permissions.title')}
+          </h3>
+        </div>
+        <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
+          <label className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              checked={skipPermissions}
+              onChange={(e) => setSkipPermissions(e.target.checked)}
+              className="w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 focus:ring-2"
+            />
+            <div>
+              <div className="font-medium text-orange-900 dark:text-orange-100">
+                {t('permissions.skipPermissions.label')}
+              </div>
+              <div className="text-sm text-orange-700 dark:text-orange-300">
+                {t('permissions.skipPermissions.geminiDescription')}
+              </div>
+            </div>
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Main component
 export default function PermissionsContent({ agent, ...props }) {
   if (agent === 'claude') {
@@ -607,6 +642,9 @@ export default function PermissionsContent({ agent, ...props }) {
   }
   if (agent === 'codex') {
     return <CodexPermissions {...props} />;
+  }
+  if (agent === 'gemini') {
+    return <GeminiPermissions {...props} />;
   }
   return null;
 }
