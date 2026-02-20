@@ -466,6 +466,47 @@ export function useChatComposerState({
     noKeyboard: true,
   });
 
+  const handleAbortSession = useCallback((force = false) => {
+    if (!force && !canAbortSession) {
+      return;
+    }
+
+    const pendingSessionId =
+      typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
+    const cursorSessionId =
+      typeof window !== 'undefined' ? sessionStorage.getItem('cursorSessionId') : null;
+
+    const candidateSessionIds = [
+      currentSessionId,
+      pendingViewSessionRef.current?.sessionId || null,
+      pendingSessionId,
+      provider === 'cursor' ? cursorSessionId : null,
+      selectedSession?.id || null,
+    ];
+
+    const targetSessionId =
+      candidateSessionIds.find((sessionId) => Boolean(sessionId) && !isTemporarySessionId(sessionId)) || null;
+
+    if (!targetSessionId) {
+      if (provider === 'gemini') {
+        sendMessage({
+          type: 'abort-session',
+          sessionId: null,
+          provider,
+        });
+        return;
+      }
+      console.warn('Abort requested but no concrete session ID is available yet.');
+      return;
+    }
+
+    sendMessage({
+      type: 'abort-session',
+      sessionId: targetSessionId,
+      provider,
+    });
+  }, [canAbortSession, currentSessionId, pendingViewSessionRef, provider, selectedSession?.id, sendMessage]);
+
   const handleSubmit = useCallback(
     async (
       event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>,
@@ -475,7 +516,18 @@ export function useChatComposerState({
         return;
       }
       const currentInput = inputValueRef.current;
-      if (!currentInput.trim() || isLoading || !selectedProject) {
+      const trimmedInput = currentInput.trim();
+
+      // Local control command: never send "/stop" to providers, always abort current run.
+      if (trimmedInput === '/stop') {
+        handleAbortSession(true);
+        setInput('');
+        inputValueRef.current = '';
+        resetCommandMenuState();
+        return;
+      }
+
+      if (!trimmedInput || isLoading || !selectedProject) {
         return;
       }
       isSubmittingRef.current = true;
@@ -684,6 +736,7 @@ export function useChatComposerState({
       claudeModel,
       codexModel,
       geminiModel,
+      handleAbortSession,
       currentSessionId,
       cursorModel,
       isLoading,
@@ -798,6 +851,16 @@ export function useChatComposerState({
           return;
         }
 
+        const trimmedInput = inputValueRef.current.trim();
+        if (trimmedInput === '/stop') {
+          event.preventDefault();
+          handleAbortSession(true);
+          setInput('');
+          inputValueRef.current = '';
+          resetCommandMenuState();
+          return;
+        }
+
         // While a turn is running, allow normal typing/newlines but block submit shortcuts.
         if (isLoading) {
           return;
@@ -814,11 +877,14 @@ export function useChatComposerState({
     },
     [
       cyclePermissionMode,
+      handleAbortSession,
       handleCommandMenuKeyDown,
       handleFileMentionsKeyDown,
       handleSubmit,
       isLoading,
+      resetCommandMenuState,
       sendByCtrlEnter,
+      setInput,
       showCommandMenu,
       showFileDropdown,
     ],
@@ -855,47 +921,6 @@ export function useChatComposerState({
     }
     setIsTextareaExpanded(false);
   }, [resetCommandMenuState]);
-
-  const handleAbortSession = useCallback(() => {
-    if (!canAbortSession) {
-      return;
-    }
-
-    const pendingSessionId =
-      typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
-    const cursorSessionId =
-      typeof window !== 'undefined' ? sessionStorage.getItem('cursorSessionId') : null;
-
-    const candidateSessionIds = [
-      currentSessionId,
-      pendingViewSessionRef.current?.sessionId || null,
-      pendingSessionId,
-      provider === 'cursor' ? cursorSessionId : null,
-      selectedSession?.id || null,
-    ];
-
-    const targetSessionId =
-      candidateSessionIds.find((sessionId) => Boolean(sessionId) && !isTemporarySessionId(sessionId)) || null;
-
-    if (!targetSessionId) {
-      if (provider === 'gemini') {
-        sendMessage({
-          type: 'abort-session',
-          sessionId: null,
-          provider,
-        });
-        return;
-      }
-      console.warn('Abort requested but no concrete session ID is available yet.');
-      return;
-    }
-
-    sendMessage({
-      type: 'abort-session',
-      sessionId: targetSessionId,
-      provider,
-    });
-  }, [canAbortSession, currentSessionId, pendingViewSessionRef, provider, selectedSession?.id, sendMessage]);
 
   const handleTranscript = useCallback((text: string) => {
     if (!text.trim()) {

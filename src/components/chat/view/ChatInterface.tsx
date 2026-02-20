@@ -436,6 +436,14 @@ function ChatInterface({
           isTextareaExpanded={isTextareaExpanded}
           sendByCtrlEnter={sendByCtrlEnter}
           onTranscript={handleTranscript}
+          claudeModel={claudeModel}
+          setClaudeModel={setClaudeModel}
+          cursorModel={cursorModel}
+          setCursorModel={setCursorModel}
+          codexModel={codexModel}
+          setCodexModel={setCodexModel}
+          geminiModel={geminiModel}
+          setGeminiModel={setGeminiModel}
         />
       </div>
 

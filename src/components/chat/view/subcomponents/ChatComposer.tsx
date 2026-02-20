@@ -5,6 +5,7 @@ import ImageAttachment from './ImageAttachment';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
 import ChatInputControls from './ChatInputControls';
 import { useTranslation } from 'react-i18next';
+import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../../../../shared/modelConstants';
 import type {
   ChangeEvent,
   ClipboardEvent,
@@ -91,6 +92,14 @@ interface ChatComposerProps {
   isTextareaExpanded: boolean;
   sendByCtrlEnter?: boolean;
   onTranscript: (text: string) => void;
+  claudeModel: string;
+  setClaudeModel: (model: string) => void;
+  cursorModel: string;
+  setCursorModel: (model: string) => void;
+  codexModel: string;
+  setCodexModel: (model: string) => void;
+  geminiModel: string;
+  setGeminiModel: (model: string) => void;
 }
 
 export default function ChatComposer({
@@ -147,6 +156,14 @@ export default function ChatComposer({
   isTextareaExpanded,
   sendByCtrlEnter,
   onTranscript,
+  claudeModel,
+  setClaudeModel,
+  cursorModel,
+  setCursorModel,
+  codexModel,
+  setCodexModel,
+  geminiModel,
+  setGeminiModel,
 }: ChatComposerProps) {
   const { t } = useTranslation('chat');
   const AnyCommandMenu = CommandMenu as any;
@@ -162,6 +179,42 @@ export default function ChatComposer({
   const hasQuestionPanel = pendingPermissionRequests.some(
     (r) => r.toolName === 'AskUserQuestion'
   );
+  const currentModel =
+    provider === 'cursor'
+      ? cursorModel
+      : provider === 'codex'
+      ? codexModel
+      : provider === 'gemini'
+      ? geminiModel
+      : claudeModel;
+  const modelOptions =
+    provider === 'cursor'
+      ? CURSOR_MODELS.OPTIONS
+      : provider === 'codex'
+      ? CODEX_MODELS.OPTIONS
+      : provider === 'gemini'
+      ? GEMINI_MODELS.OPTIONS
+      : CLAUDE_MODELS.OPTIONS;
+  const handleModelChange = (value: string) => {
+    if (provider === 'cursor') {
+      setCursorModel(value);
+      localStorage.setItem('cursor-model', value);
+      return;
+    }
+    if (provider === 'codex') {
+      setCodexModel(value);
+      localStorage.setItem('codex-model', value);
+      return;
+    }
+    if (provider === 'gemini') {
+      setGeminiModel(value);
+      localStorage.setItem('gemini-model', value);
+      return;
+    }
+
+    setClaudeModel(value);
+    localStorage.setItem('claude-model', value);
+  };
 
   return (
     <div className="p-2 sm:p-4 md:p-4 flex-shrink-0 pb-2 sm:pb-4 md:pb-6">
@@ -197,6 +250,9 @@ export default function ChatComposer({
           isUserScrolledUp={isUserScrolledUp}
           hasMessages={hasMessages}
           onScrollToBottom={onScrollToBottom}
+          currentModel={currentModel}
+          modelOptions={modelOptions}
+          onModelChange={handleModelChange}
         />}
       </div>
 

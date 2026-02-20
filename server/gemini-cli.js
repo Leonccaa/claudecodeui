@@ -209,18 +209,16 @@ async function spawnGemini(command, options = {}, ws) {
       args.push('--resume', sessionId);
     }
 
+    const resolvedModel = normalizeGeminiModel(model);
+    if (model && model !== resolvedModel) {
+      console.warn(`Unsupported Gemini model "${model}", falling back to "${resolvedModel}"`);
+    }
+    // Always pass model so resumed sessions can switch models turn-by-turn.
+    args.push('--model', resolvedModel);
+
     if (command && command.trim()) {
       // Provide a prompt (works for both new and resumed sessions)
       args.push('-p', command);
-
-      // Add model flag if specified
-      if (!sessionId) {
-        const resolvedModel = normalizeGeminiModel(model);
-        if (model && model !== resolvedModel) {
-          console.warn(`Unsupported Gemini model "${model}", falling back to "${resolvedModel}"`);
-        }
-        args.push('--model', resolvedModel);
-      }
 
       // Request streaming JSON
       args.push('--output-format', 'stream-json');

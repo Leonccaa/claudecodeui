@@ -18,6 +18,9 @@ interface ChatInputControlsProps {
   isUserScrolledUp: boolean;
   hasMessages: boolean;
   onScrollToBottom: () => void;
+  currentModel: string;
+  modelOptions: Array<{ value: string; label: string }>;
+  onModelChange: (value: string) => void;
 }
 
 export default function ChatInputControls({
@@ -34,6 +37,9 @@ export default function ChatInputControls({
   isUserScrolledUp,
   hasMessages,
   onScrollToBottom,
+  currentModel,
+  modelOptions,
+  onModelChange,
 }: ChatInputControlsProps) {
   const { t } = useTranslation('chat');
 
@@ -102,6 +108,19 @@ export default function ChatInputControls({
           </span>
         )}
       </button>
+
+      <select
+        value={currentModel}
+        onChange={(event) => onModelChange(event.target.value)}
+        className="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-xs sm:text-sm font-medium border border-border/60 bg-card/70 text-muted-foreground max-w-[220px] truncate hover:bg-accent/50 transition-colors"
+        title={`Model: ${currentModel}`}
+      >
+        {modelOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
 
       {hasInput && (
         <button
