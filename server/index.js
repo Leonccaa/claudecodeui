@@ -42,7 +42,7 @@ import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
 
-import { getProjects, getSessions, getSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
+import { getProjects, getSessions, getSessionMessages, renameProject, renameSession, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import {
@@ -540,6 +540,18 @@ app.put('/api/projects/:projectName/rename', authenticateToken, async (req, res)
     try {
         const { displayName } = req.body;
         await renameProject(req.params.projectName, displayName);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Rename session title (provider-aware overlay, non-destructive)
+app.put('/api/projects/:projectName/sessions/:sessionId/rename', authenticateToken, async (req, res) => {
+    try {
+        const { projectName, sessionId } = req.params;
+        const { summary, provider = 'claude' } = req.body || {};
+        await renameSession(projectName, sessionId, provider, summary);
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });

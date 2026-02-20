@@ -197,6 +197,51 @@ async function detectTaskMasterFolder(projectPath) {
 
 // Cache for extracted project directories
 const projectDirectoryCache = new Map();
+const SUPPORTED_SESSION_RENAME_PROVIDERS = new Set(['claude', 'cursor', 'codex', 'gemini']);
+
+function normalizeSessionRenameProvider(provider) {
+  const normalized = String(provider || '').trim().toLowerCase();
+  return SUPPORTED_SESSION_RENAME_PROVIDERS.has(normalized) ? normalized : 'claude';
+}
+
+function getSessionOverrideKey(provider, sessionId) {
+  return `${normalizeSessionRenameProvider(provider)}:${sessionId}`;
+}
+
+function getSessionOverridesForProject(config, projectName) {
+  const projectConfig = config?.[projectName];
+  if (!projectConfig || typeof projectConfig !== 'object') {
+    return {};
+  }
+
+  const sessionOverrides = projectConfig.sessionOverrides;
+  if (!sessionOverrides || typeof sessionOverrides !== 'object') {
+    return {};
+  }
+
+  return sessionOverrides;
+}
+
+function applySessionRenameOverrides(config, projectName, provider, sessions = []) {
+  const sessionOverrides = getSessionOverridesForProject(config, projectName);
+  const sessionField = provider === 'cursor' || provider === 'gemini' ? 'name' : 'summary';
+
+  return sessions.map((session) => {
+    if (!session || !session.id) {
+      return session;
+    }
+
+    const customTitle = sessionOverrides[getSessionOverrideKey(provider, session.id)];
+    if (!customTitle) {
+      return session;
+    }
+
+    return {
+      ...session,
+      [sessionField]: customTitle,
+    };
+  });
+}
 
 // Clear cache when needed (called when project files change)
 function clearProjectDirectoryCache() {
@@ -460,7 +505,12 @@ async function getProjects(progressCallback = null) {
         
         // Also fetch Cursor sessions for this project
         try {
-          project.cursorSessions = await getCursorSessions(actualProjectDir);
+          project.cursorSessions = applySessionRenameOverrides(
+            config,
+            entry.name,
+            'cursor',
+            await getCursorSessions(actualProjectDir),
+          );
         } catch (e) {
           console.warn(`Could not load Cursor sessions for project ${entry.name}:`, e.message);
           project.cursorSessions = [];
@@ -468,9 +518,14 @@ async function getProjects(progressCallback = null) {
 
         // Also fetch Codex sessions for this project
         try {
-          project.codexSessions = await getCodexSessions(actualProjectDir, {
-            indexRef: codexSessionsIndexRef,
-          });
+          project.codexSessions = applySessionRenameOverrides(
+            config,
+            entry.name,
+            'codex',
+            await getCodexSessions(actualProjectDir, {
+              indexRef: codexSessionsIndexRef,
+            }),
+          );
         } catch (e) {
           console.warn(`Could not load Codex sessions for project ${entry.name}:`, e.message);
           project.codexSessions = [];
@@ -478,7 +533,12 @@ async function getProjects(progressCallback = null) {
 
         // Also fetch Gemini sessions for this project
         try {
-          project.geminiSessions = await getGeminiSessions(actualProjectDir);
+          project.geminiSessions = applySessionRenameOverrides(
+            config,
+            entry.name,
+            'gemini',
+            await getGeminiSessions(actualProjectDir),
+          );
         } catch (e) {
           console.warn(`Could not load Gemini sessions for project ${entry.name}:`, e.message);
           project.geminiSessions = [];
@@ -562,23 +622,38 @@ async function getProjects(progressCallback = null) {
 
       // Try to fetch Cursor sessions for manual projects too
       try {
-        project.cursorSessions = await getCursorSessions(actualProjectDir);
+        project.cursorSessions = applySessionRenameOverrides(
+          config,
+          projectName,
+          'cursor',
+          await getCursorSessions(actualProjectDir),
+        );
       } catch (e) {
         console.warn(`Could not load Cursor sessions for manual project ${projectName}:`, e.message);
       }
 
       // Try to fetch Codex sessions for manual projects too
       try {
-        project.codexSessions = await getCodexSessions(actualProjectDir, {
-          indexRef: codexSessionsIndexRef,
-        });
+        project.codexSessions = applySessionRenameOverrides(
+          config,
+          projectName,
+          'codex',
+          await getCodexSessions(actualProjectDir, {
+            indexRef: codexSessionsIndexRef,
+          }),
+        );
       } catch (e) {
         console.warn(`Could not load Codex sessions for manual project ${projectName}:`, e.message);
       }
 
       // Try to fetch Gemini sessions for manual projects too
       try {
-        project.geminiSessions = await getGeminiSessions(actualProjectDir);
+        project.geminiSessions = applySessionRenameOverrides(
+          config,
+          projectName,
+          'gemini',
+          await getGeminiSessions(actualProjectDir),
+        );
       } catch (e) {
         console.warn(`Could not load Gemini sessions for manual project ${projectName}:`, e.message);
       }
@@ -736,8 +811,10 @@ async function getSessions(projectName, limit = 5, offset = 0) {
       .filter(session => !session.summary.startsWith('{ "'))
       .sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity));
 
-    const total = visibleSessions.length;
-    const paginatedSessions = visibleSessions.slice(offset, offset + limit);
+    const config = await loadProjectConfig();
+    const renamedSessions = applySessionRenameOverrides(config, projectName, 'claude', visibleSessions);
+    const total = renamedSessions.length;
+    const paginatedSessions = renamedSessions.slice(offset, offset + limit);
     const hasMore = offset + limit < total;
     
     return {
@@ -1004,6 +1081,43 @@ async function renameProject(projectName, newDisplayName) {
   return true;
 }
 
+async function renameSession(projectName, sessionId, provider = 'claude', newSummary = '') {
+  if (!projectName || !sessionId) {
+    throw new Error('projectName and sessionId are required');
+  }
+
+  const normalizedProvider = normalizeSessionRenameProvider(provider);
+  const normalizedSummary = typeof newSummary === 'string' ? newSummary.trim() : '';
+  const config = await loadProjectConfig();
+  const existing = config[projectName] || {};
+  const existingOverrides = getSessionOverridesForProject(config, projectName);
+  const nextOverrides = { ...existingOverrides };
+  const overrideKey = getSessionOverrideKey(normalizedProvider, sessionId);
+
+  if (!normalizedSummary) {
+    delete nextOverrides[overrideKey];
+  } else {
+    nextOverrides[overrideKey] = normalizedSummary;
+  }
+
+  if (Object.keys(nextOverrides).length > 0) {
+    config[projectName] = {
+      ...existing,
+      sessionOverrides: nextOverrides,
+    };
+  } else if (config[projectName]) {
+    const { sessionOverrides, ...rest } = existing;
+    if (Object.keys(rest).length === 0) {
+      delete config[projectName];
+    } else {
+      config[projectName] = rest;
+    }
+  }
+
+  await saveProjectConfig(config);
+  return true;
+}
+
 // Delete a session from a project
 async function deleteSession(projectName, sessionId) {
   const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
@@ -1045,6 +1159,7 @@ async function deleteSession(projectName, sessionId) {
         
         // Write back the filtered content
         await fs.writeFile(jsonlFile, filteredLines.join('\n') + (filteredLines.length > 0 ? '\n' : ''));
+        await renameSession(projectName, sessionId, 'claude', '');
         return true;
       }
     }
@@ -1782,6 +1897,7 @@ export {
   getSessionMessages,
   parseJsonlSessions,
   renameProject,
+  renameSession,
   deleteSession,
   isProjectEmpty,
   deleteProject,

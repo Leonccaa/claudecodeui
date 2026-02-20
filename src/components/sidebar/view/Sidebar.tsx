@@ -172,8 +172,8 @@ function Sidebar({
       setEditingSession(null);
       setEditingSessionName('');
     },
-    onSaveEditingSession: (projectName, sessionId, summary) => {
-      void updateSessionSummary(projectName, sessionId, summary);
+    onSaveEditingSession: (projectName, sessionId, summary, provider) => {
+      void updateSessionSummary(projectName, sessionId, summary, provider);
     },
     touchHandlerFactory: handleTouchClick,
     t,
