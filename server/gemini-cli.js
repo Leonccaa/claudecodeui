@@ -448,7 +448,7 @@ async function spawnGemini(command, options = {}, ws) {
     
     geminiProcess.on('close', async (code) => {
       console.log(`Gemini CLI process exited with code ${code}`);
-      const finalSessionId = capturedSessionId || sessionId || tempKey;
+      const finalSessionId = capturedSessionId || sessionId || null;
       removeProcessEntries(geminiProcess);
       if (policyFilePath) {
         fs.unlink(policyFilePath).catch(() => {});

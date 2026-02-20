@@ -48,6 +48,7 @@ interface UseChatRealtimeHandlersArgs {
   onSessionNotProcessing?: (sessionId?: string | null) => void;
   onReplaceTemporarySession?: (sessionId?: string | null) => void;
   onNavigateToSession?: (sessionId: string) => void;
+  onPreflightError?: (payload: { provider: SessionProvider; message: string }) => void;
 }
 
 const appendStreamingChunk = (
@@ -273,8 +274,10 @@ export function useChatRealtimeHandlers({
   onSessionNotProcessing,
   onReplaceTemporarySession,
   onNavigateToSession,
+  onPreflightError,
 }: UseChatRealtimeHandlersArgs) {
   const lastProcessedMessageRef = useRef<LatestChatMessage | null>(null);
+  const preflightFailureRef = useRef<{ startedAt: number } | null>(null);
 
   useEffect(() => {
     if (!latestMessage) {
@@ -337,12 +340,23 @@ export function useChatRealtimeHandlers({
 
     const pendingSessionIdFromStorage =
       typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
+    const pendingTempSessionId =
+      typeof window !== 'undefined' ? sessionStorage.getItem('pendingTempSessionId') : null;
     const hasPendingUnboundSession =
       Boolean(pendingViewSessionRef.current) && pendingViewSessionRef.current?.sessionId === null;
     const activeViewSessionId = hasPendingUnboundSession
       ? null
       : selectedSession?.id || currentSessionId || pendingViewSessionRef.current?.sessionId || null;
+    if (
+      preflightFailureRef.current &&
+      pendingViewSessionRef.current &&
+      pendingViewSessionRef.current.startedAt !== preflightFailureRef.current.startedAt
+    ) {
+      preflightFailureRef.current = null;
+    }
+
     const isSystemInitForView =
+      !preflightFailureRef.current &&
       systemInitSessionId &&
       (hasPendingUnboundSession || !activeViewSessionId || systemInitSessionId === activeViewSessionId);
     const isLifecycleForPendingSession =
@@ -368,10 +382,19 @@ export function useChatRealtimeHandlers({
       (hasTemporaryViewSession && isLifecycleForPendingSession) ||
       shouldBypassGeminiPendingLifecycle;
     const isErrorMessageType =
+      latestMessage.type === 'error' ||
       latestMessage.type === 'claude-error' ||
       latestMessage.type === 'cursor-error' ||
       latestMessage.type === 'codex-error' ||
       latestMessage.type === 'gemini-error';
+    const isGeminiResultErrorWithoutSession =
+      latestMessage.type === 'gemini-result' &&
+      !latestMessage.sessionId &&
+      (
+        String(rawStructuredData?.status || '').toLowerCase() === 'error' ||
+        Boolean(rawStructuredData?.error) ||
+        Boolean(latestMessage.error)
+      );
     const isUnscopedError =
       !latestMessage.sessionId &&
       isErrorMessageType &&
@@ -380,6 +403,9 @@ export function useChatRealtimeHandlers({
         Boolean(pendingSessionIdFromStorage) ||
         hasTemporaryViewSession
       );
+    const isNewSessionView =
+      !selectedSession?.id && (!currentSessionId || isTemporarySessionId(currentSessionId));
+    const isPreflightAttempt = Boolean(hasPendingUnboundSession || pendingTempSessionId);
 
     const handleBackgroundLifecycle = (sessionId?: string) => {
       if (!sessionId) {
@@ -410,17 +436,28 @@ export function useChatRealtimeHandlers({
       });
     };
 
+    const reportPreflightError = (message: string): boolean => {
+      if (!isNewSessionView || !isPreflightAttempt || Boolean(latestMessage.sessionId)) {
+        return false;
+      }
+      const startedAt = pendingViewSessionRef.current?.startedAt || Date.now();
+      preflightFailureRef.current = { startedAt };
+      clearLoadingIndicators();
+      onPreflightError?.({ provider, message });
+      return true;
+    };
+
     if (!shouldBypassSessionFilter) {
       if (!activeViewSessionId) {
         if (latestMessage.sessionId && lifecycleMessageTypes.has(String(latestMessage.type))) {
           handleBackgroundLifecycle(latestMessage.sessionId);
         }
-        if (!isUnscopedError) {
+        if (!isUnscopedError && !isGeminiResultErrorWithoutSession) {
           return;
         }
       }
 
-      if (!latestMessage.sessionId && !isUnscopedError) {
+      if (!latestMessage.sessionId && !isUnscopedError && !isGeminiResultErrorWithoutSession) {
         return;
       }
 
@@ -708,11 +745,35 @@ export function useChatRealtimeHandlers({
         break;
 
       case 'claude-error':
+        if (reportPreflightError(String(latestMessage.error || 'Unknown error'))) {
+          break;
+        }
         setChatMessages((previous) => [
           ...previous,
           {
             type: 'error',
             content: `Error: ${latestMessage.error}`,
+            timestamp: new Date(),
+          },
+        ]);
+        break;
+
+      case 'error':
+        if (reportPreflightError(String(latestMessage.error || 'Unknown error'))) {
+          break;
+        }
+        clearLoadingIndicators();
+        markSessionsAsCompleted(
+          latestMessage.sessionId,
+          currentSessionId,
+          selectedSession?.id,
+          typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null,
+        );
+        setChatMessages((previous) => [
+          ...previous,
+          {
+            type: 'error',
+            content: `Error: ${latestMessage.error || 'Unknown error'}`,
             timestamp: new Date(),
           },
         ]);
@@ -757,25 +818,6 @@ export function useChatRealtimeHandlers({
         try {
           const geminiData = latestMessage.data;
           if (geminiData && geminiData.type === 'init' && geminiData.session_id) {
-            if (typeof geminiData.model === 'string' && geminiData.model.trim()) {
-              setChatMessages((previous) => {
-                const modelText = `Gemini model in use: ${geminiData.model.trim()}`;
-                const alreadyShown = previous.some(
-                  (message) => message.type === 'assistant' && message.content === modelText,
-                );
-                if (alreadyShown) {
-                  return previous;
-                }
-                return [
-                  ...previous,
-                  {
-                    type: 'assistant',
-                    content: modelText,
-                    timestamp: new Date(),
-                  },
-                ];
-              });
-            }
             if (!isSystemInitForView) { return; }
             if (currentSessionId && geminiData.session_id !== currentSessionId) {
               setIsSystemSessionChange(true);
@@ -861,6 +903,10 @@ export function useChatRealtimeHandlers({
         const resolvedGeminiSessionId =
           latestMessage.sessionId || pendingSessionIdFromStorage || currentSessionId || null;
 
+        if (reportPreflightError(normalizedGeminiError.content)) {
+          break;
+        }
+
         if (
           latestMessage.sessionId &&
           (!currentSessionId || isTemporarySessionId(currentSessionId))
@@ -906,6 +952,15 @@ export function useChatRealtimeHandlers({
         const resultData = latestMessage.data || {};
         const resultStatus = String(resultData.status || '').toLowerCase();
         const actualModelLabel = extractGeminiActualModelLabel(resultData);
+
+        if (!latestMessage.sessionId && resultStatus === 'error') {
+          const errorText =
+            String(resultData?.error?.message || latestMessage.error || 'Unknown Gemini error');
+          const normalizedGeminiError = formatGeminiCliError(errorText);
+          if (reportPreflightError(normalizedGeminiError.content)) {
+            break;
+          }
+        }
 
         clearLoadingIndicators();
         markSessionsAsCompleted(
@@ -976,6 +1031,9 @@ export function useChatRealtimeHandlers({
         break;
 
       case 'cursor-error':
+        if (reportPreflightError(`Cursor error: ${latestMessage.error || 'Unknown error'}`)) {
+          break;
+        }
         setChatMessages((previous) => [
           ...previous,
           {

@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import QuickSettingsPanel from '../../QuickSettingsPanel';
 import { useTasksSettings } from '../../../contexts/TasksSettingsContext';
 import { useTranslation } from 'react-i18next';
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
+import PreflightErrorModal from './subcomponents/PreflightErrorModal';
 import type { ChatInterfaceProps } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
@@ -40,12 +42,14 @@ function ChatInterface({
   externalMessageUpdate,
   onShowAllTasks,
 }: ChatInterfaceProps) {
+  const navigate = useNavigate();
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
   const { t } = useTranslation('chat');
 
   const streamBufferRef = useRef('');
   const streamTimerRef = useRef<number | null>(null);
   const pendingViewSessionRef = useRef<PendingViewSession | null>(null);
+  const [preflightError, setPreflightError] = useState<{ provider: string; message: string } | null>(null);
 
   const resetStreamingState = useCallback(() => {
     if (streamTimerRef.current) {
@@ -218,6 +222,7 @@ function ChatInterface({
     onSessionNotProcessing,
     onReplaceTemporarySession,
     onNavigateToSession,
+    onPreflightError: (payload) => setPreflightError(payload),
   });
 
   useEffect(() => {
@@ -253,6 +258,42 @@ function ChatInterface({
     };
   }, [resetStreamingState]);
 
+  const handlePreflightConfirm = useCallback(() => {
+    setPreflightError(null);
+    pendingViewSessionRef.current = null;
+
+    if (typeof window !== 'undefined') {
+      const pendingTemp = sessionStorage.getItem('pendingTempSessionId');
+      if (pendingTemp) {
+        onSessionInactive?.(pendingTemp);
+        onSessionNotProcessing?.(pendingTemp);
+      }
+      sessionStorage.removeItem('pendingSessionId');
+      sessionStorage.removeItem('pendingTempSessionId');
+    }
+
+    resetStreamingState();
+    setChatMessages([]);
+    setSessionMessages([]);
+    setCurrentSessionId(null);
+    setIsLoading(false);
+    setCanAbortSession(false);
+    setClaudeStatus(null);
+
+    navigate('/');
+  }, [
+    navigate,
+    onSessionInactive,
+    onSessionNotProcessing,
+    resetStreamingState,
+    setCanAbortSession,
+    setChatMessages,
+    setClaudeStatus,
+    setCurrentSessionId,
+    setIsLoading,
+    setSessionMessages,
+  ]);
+
   if (!selectedProject) {
     const selectedProviderLabel =
       provider === 'cursor'
@@ -277,6 +318,12 @@ function ChatInterface({
 
   return (
     <>
+      <PreflightErrorModal
+        isOpen={Boolean(preflightError)}
+        title="Request failed"
+        message={preflightError?.message || ''}
+        onConfirm={handlePreflightConfirm}
+      />
       <div className="h-full flex flex-col">
         <ChatMessagesPane
           scrollContainerRef={scrollContainerRef}

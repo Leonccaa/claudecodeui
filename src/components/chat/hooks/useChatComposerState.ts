@@ -541,17 +541,27 @@ export function useChatComposerState({
       setIsUserScrolledUp(false);
       setTimeout(() => scrollToBottom(), 100);
 
-      // If no session is selected (e.g. after clicking "+ New Session"), force a new session.
-      // This avoids a race where stale currentSessionId could accidentally resume the previous thread.
-      const effectiveSessionId = selectedSession?.id
-        ? (currentSessionId || selectedSession.id || sessionStorage.getItem('cursorSessionId'))
+      // Only real persisted session IDs are resumable.
+      // Temporary IDs (new-session-*) should never be sent as --resume targets.
+      const selectedSessionId = selectedSession?.id || null;
+      const hasRealSelectedSession = Boolean(
+        selectedSessionId && !isTemporarySessionId(selectedSessionId),
+      );
+      const sessionCandidates = [
+        currentSessionId,
+        selectedSessionId,
+        sessionStorage.getItem('cursorSessionId'),
+      ];
+      const effectiveSessionId = hasRealSelectedSession
+        ? (sessionCandidates.find((sessionId) => sessionId && !isTemporarySessionId(sessionId)) || null)
         : null;
       const sessionToActivate = effectiveSessionId || `new-session-${Date.now()}`;
 
-      if (!effectiveSessionId && !selectedSession?.id) {
+      if (!effectiveSessionId && !hasRealSelectedSession) {
         if (typeof window !== 'undefined') {
           // Reset stale pending IDs from previous interrupted runs before creating a new one.
           sessionStorage.removeItem('pendingSessionId');
+          sessionStorage.setItem('pendingTempSessionId', sessionToActivate);
         }
         pendingViewSessionRef.current = { sessionId: null, startedAt: Date.now() };
       }
@@ -788,6 +798,11 @@ export function useChatComposerState({
           return;
         }
 
+        // While a turn is running, allow normal typing/newlines but block submit shortcuts.
+        if (isLoading) {
+          return;
+        }
+
         if ((event.ctrlKey || event.metaKey) && !event.shiftKey) {
           event.preventDefault();
           handleSubmit(event);
@@ -802,6 +817,7 @@ export function useChatComposerState({
       handleCommandMenuKeyDown,
       handleFileMentionsKeyDown,
       handleSubmit,
+      isLoading,
       sendByCtrlEnter,
       showCommandMenu,
       showFileDropdown,
