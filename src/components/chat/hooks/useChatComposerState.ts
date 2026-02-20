@@ -619,7 +619,20 @@ export function useChatComposerState({
       }
       onSessionActive?.(sessionToActivate);
 
-      const getToolsSettings = () => {
+      const hasMeaningfulToolSettings = (settings: any) => {
+        if (!settings || typeof settings !== 'object') return false;
+        const allowed =
+          (Array.isArray(settings.allowedTools) && settings.allowedTools.length > 0) ||
+          (Array.isArray(settings.allowedCommands) && settings.allowedCommands.length > 0);
+        const disallowed =
+          (Array.isArray(settings.disallowedTools) && settings.disallowedTools.length > 0) ||
+          (Array.isArray(settings.disallowedCommands) && settings.disallowedCommands.length > 0);
+        const skip = Boolean(settings.skipPermissions);
+        const mode = typeof settings.permissionMode === 'string' && settings.permissionMode.trim().length > 0;
+        return allowed || disallowed || skip || mode;
+      };
+
+      const getToolsSettings = async () => {
         try {
           const settingsKey =
             provider === 'cursor'
@@ -631,7 +644,28 @@ export function useChatComposerState({
               : 'claude-settings';
           const savedSettings = safeLocalStorage.getItem(settingsKey);
           if (savedSettings) {
-            return JSON.parse(savedSettings);
+            const parsed = JSON.parse(savedSettings);
+            // If local cache exists but is effectively empty, refresh from backend.
+            if (hasMeaningfulToolSettings(parsed)) {
+              return parsed;
+            }
+          }
+
+          // Cross-device fallback: hydrate local cache from server-side synced settings.
+          const response = await authenticatedFetch('/api/settings/tool-settings');
+          if (response.ok) {
+            const data = await response.json();
+            const syncedSettings = data?.settings?.[provider];
+            if (syncedSettings && typeof syncedSettings === 'object') {
+              safeLocalStorage.setItem(settingsKey, JSON.stringify(syncedSettings));
+              if (provider === 'gemini') {
+                safeLocalStorage.setItem(
+                  'gemini-skip-permissions',
+                  String(Boolean((syncedSettings as { skipPermissions?: boolean })?.skipPermissions)),
+                );
+              }
+              return syncedSettings;
+            }
           }
         } catch (error) {
           console.error('Error loading tools settings:', error);
@@ -644,7 +678,7 @@ export function useChatComposerState({
         };
       };
 
-      const toolsSettings = getToolsSettings();
+      const toolsSettings = await getToolsSettings();
       const resolvedProjectPath = selectedProject.fullPath || selectedProject.path || '';
 
       if (provider === 'cursor') {
