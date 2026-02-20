@@ -472,7 +472,7 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
         if (!message.toolCallId || convertedMessage.toolCallId === message.toolCallId) {
           convertedMessage.toolResult = {
             content: message.output || '',
-            isError: false,
+            isError: Boolean(message.is_error),
           };
           break;
         }

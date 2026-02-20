@@ -69,6 +69,35 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     }
   },
 
+  BashGemini: {
+    input: {
+      type: 'one-line',
+      icon: 'terminal',
+      getValue: (input) => input.command,
+      getSecondary: (input) => input.description,
+      action: 'copy',
+      style: 'terminal',
+      wrapText: true,
+      colorScheme: {
+        primary: 'text-green-400 font-mono',
+        secondary: 'text-gray-400',
+        background: '',
+        border: 'border-green-500 dark:border-green-400',
+        icon: 'text-green-500 dark:text-green-400'
+      }
+    },
+    result: {
+      type: 'collapsible',
+      title: 'Command output',
+      defaultOpen: false,
+      contentType: 'text',
+      getContentProps: (result) => ({
+        content: String(result?.content || ''),
+        format: 'plain'
+      })
+    }
+  },
+
   // ============================================================================
   // FILE OPERATION TOOLS
   // ============================================================================

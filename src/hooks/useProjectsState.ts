@@ -501,11 +501,6 @@ export function useProjectsState({
 
   const handleNewSession = useCallback(
     (project: Project) => {
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem('forceNewSession', '1');
-        sessionStorage.removeItem('pendingSessionId');
-        sessionStorage.removeItem('cursorSessionId');
-      }
       setSelectedProject(project);
       setSelectedSession(null);
       setActiveTab('chat');

@@ -105,6 +105,33 @@ const toDisplayText = (value: unknown): string => {
   }
 };
 
+const GEMINI_TOOL_NAME_ALIASES: Record<string, string> = {
+  run_shell_command: 'BashGemini',
+  shell_command: 'BashGemini',
+  read_file: 'Read',
+  write_file: 'Write',
+  replace: 'Edit',
+  replace_in_file: 'Edit',
+  edit_file: 'Edit',
+  grep_search: 'Grep',
+  search_file_content: 'Grep',
+};
+
+const normalizeGeminiToolName = (toolName?: string): string => {
+  const normalized = String(toolName || '').trim();
+  if (!normalized) {
+    return 'Tool';
+  }
+  return GEMINI_TOOL_NAME_ALIASES[normalized] || normalized;
+};
+
+const GEMINI_THINKING_LINE_PATTERN =
+  /^\s*[\.\-·]*\s*(thinking|reasoning|analyzing|processing|working)\s*\.{0,3}\s*$/i;
+
+const isLikelyGeminiThinkingLine = (line: string): boolean => {
+  return GEMINI_THINKING_LINE_PATTERN.test(String(line || '').trim());
+};
+
 const extractGeminiToolResultText = (payload: any): string => {
   if (!payload) {
     return '';
@@ -208,6 +235,20 @@ function formatGeminiCliError(errorText: string): { content: string; asError: bo
     modelNotFound: false,
     content: `Gemini error: ${normalized}`,
   };
+}
+
+function extractGeminiActualModelLabel(resultData: any): string | null {
+  const modelsObject = resultData?.stats?.models;
+  if (!modelsObject || typeof modelsObject !== 'object') {
+    return null;
+  }
+
+  const modelNames = Object.keys(modelsObject).filter(Boolean);
+  if (modelNames.length === 0) {
+    return null;
+  }
+
+  return modelNames.join(', ');
 }
 
 export function useChatRealtimeHandlers({
@@ -459,7 +500,7 @@ export function useChatRealtimeHandlers({
                 content: '',
                 timestamp: new Date(),
                 isToolUse: true,
-                toolName: tool.name || 'Tool',
+                toolName: provider === 'gemini' ? normalizeGeminiToolName(tool.name) : (tool.name || 'Tool'),
                 toolInput: toDisplayText(tool.input),
                 toolId: tool.id,
                 toolResult: null,
@@ -526,7 +567,7 @@ export function useChatRealtimeHandlers({
                   content: '',
                   timestamp: new Date(),
                   isToolUse: true,
-                  toolName: part.name,
+                  toolName: provider === 'gemini' ? normalizeGeminiToolName(part.name) : part.name,
                   toolInput,
                   toolId: part.id,
                   toolResult: null,
@@ -864,6 +905,7 @@ export function useChatRealtimeHandlers({
         const pendingGeminiSessionId = sessionStorage.getItem('pendingSessionId');
         const resultData = latestMessage.data || {};
         const resultStatus = String(resultData.status || '').toLowerCase();
+        const actualModelLabel = extractGeminiActualModelLabel(resultData);
 
         clearLoadingIndicators();
         markSessionsAsCompleted(
@@ -881,6 +923,24 @@ export function useChatRealtimeHandlers({
           setCurrentSessionId(geminiCompletedSessionId);
           sessionStorage.removeItem('pendingSessionId');
           console.log('Gemini session complete, ID set to:', geminiCompletedSessionId);
+        }
+
+        if (actualModelLabel) {
+          const modelNotice = `Gemini actual model used: ${actualModelLabel}`;
+          setChatMessages((previous) => {
+            const last = previous[previous.length - 1];
+            if (last?.type === 'assistant' && last.content === modelNotice) {
+              return previous;
+            }
+            return [
+              ...previous,
+              {
+                type: 'assistant',
+                content: modelNotice,
+                timestamp: new Date(),
+              },
+            ];
+          });
         }
 
         if (resultStatus === 'error') {
@@ -1017,6 +1077,18 @@ export function useChatRealtimeHandlers({
             .trim();
 
           if (cleaned) {
+            if (isLikelyGeminiThinkingLine(cleaned)) {
+              setChatMessages((previous) => [
+                ...previous,
+                {
+                  type: 'assistant',
+                  content: cleaned,
+                  timestamp: new Date(),
+                  isThinking: true,
+                },
+              ]);
+              break;
+            }
             streamBufferRef.current += streamBufferRef.current ? `\n${cleaned}` : cleaned;
             if (!streamTimerRef.current) {
               streamTimerRef.current = window.setTimeout(() => {

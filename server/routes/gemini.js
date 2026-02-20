@@ -7,6 +7,75 @@ import { extractProjectDirectory } from '../projects.js';
 
 const router = express.Router();
 
+const GEMINI_TOOL_NAME_ALIASES = {
+  run_shell_command: 'BashGemini',
+  shell_command: 'BashGemini',
+  read_file: 'Read',
+  write_file: 'Write',
+  replace: 'Edit',
+  replace_in_file: 'Edit',
+  edit_file: 'Edit',
+  grep_search: 'Grep',
+  search_file_content: 'Grep',
+};
+
+function normalizeGeminiToolName(toolName) {
+  const normalized = String(toolName || '').trim();
+  if (!normalized) {
+    return 'Tool';
+  }
+  return GEMINI_TOOL_NAME_ALIASES[normalized] || normalized;
+}
+
+function extractGeminiHistoryToolOutput(toolCall) {
+  const result = toolCall?.result;
+
+  if (typeof result === 'string') {
+    return result;
+  }
+
+  if (Array.isArray(result)) {
+    const candidateLines = result
+      .map((item) =>
+        item?.functionResponse?.response?.output
+        || item?.response?.output
+        || item?.output
+        || item?.resultDisplay
+        || '',
+      )
+      .filter((value) => typeof value === 'string' && value.trim());
+    if (candidateLines.length > 0) {
+      return candidateLines.join('\n');
+    }
+  }
+
+  const direct =
+    toolCall?.functionResponse?.response?.output
+    || toolCall?.response?.output
+    || toolCall?.output
+    || toolCall?.resultDisplay
+    || toolCall?.displayText
+    || toolCall?.message;
+  if (typeof direct === 'string' && direct.trim()) {
+    return direct;
+  }
+
+  if (result != null) {
+    try {
+      return JSON.stringify(result, null, 2);
+    } catch (_) {
+      return String(result);
+    }
+  }
+
+  return '';
+}
+
+function isGeminiHistoryToolResultError(toolCall) {
+  const status = String(toolCall?.status || '').toLowerCase();
+  return status === 'error' || Boolean(toolCall?.error);
+}
+
 async function resolveProjectRoot(projectPathParam) {
   if (!projectPathParam || typeof projectPathParam !== 'string') {
     return null;
@@ -182,33 +251,21 @@ router.get('/sessions/:sessionId/messages', async (req, res) => {
           messages.push({
             id: `${toolCallId}-use`,
             type: 'tool_use',
-            toolName: toolCall?.displayName || toolCall?.name || 'Tool',
+            toolName: normalizeGeminiToolName(toolCall?.displayName || toolCall?.name || 'Tool'),
             toolInput: toolCall?.args || null,
             toolCallId,
             timestamp: toolTimestamp,
           });
 
-          let toolOutput = '';
-          if (typeof toolCall?.result === 'string') {
-            toolOutput = toolCall.result;
-          } else if (Array.isArray(toolCall?.result)) {
-            toolOutput = toolCall.result
-              .map((item) => item?.functionResponse?.response?.output || '')
-              .filter(Boolean)
-              .join('\n');
-          } else if (toolCall?.result != null) {
-            try {
-              toolOutput = JSON.stringify(toolCall.result, null, 2);
-            } catch (_) {
-              toolOutput = String(toolCall.result);
-            }
-          }
+          const toolOutput = extractGeminiHistoryToolOutput(toolCall);
+          const toolError = isGeminiHistoryToolResultError(toolCall);
 
           messages.push({
             id: `${toolCallId}-result`,
             type: 'tool_result',
             toolCallId,
             output: toolOutput,
+            is_error: toolError,
             timestamp: toolTimestamp,
           });
         }

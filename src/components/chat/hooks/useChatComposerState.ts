@@ -131,6 +131,7 @@ export function useChatComposerState({
     ((event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>) => Promise<void>) | null
   >(null);
   const inputValueRef = useRef(input);
+  const isSubmittingRef = useRef(false);
 
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
@@ -470,10 +471,15 @@ export function useChatComposerState({
       event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>,
     ) => {
       event.preventDefault();
+      if (isSubmittingRef.current) {
+        return;
+      }
       const currentInput = inputValueRef.current;
       if (!currentInput.trim() || isLoading || !selectedProject) {
         return;
       }
+      isSubmittingRef.current = true;
+      try {
 
       let messageContent = currentInput;
       const selectedThinkingMode = thinkingModes.find((mode: { id: string; prefix?: string }) => mode.id === thinkingMode);
@@ -659,6 +665,9 @@ export function useChatComposerState({
       }
 
       safeLocalStorage.removeItem(`draft_input_${selectedProject.name}`);
+      } finally {
+        isSubmittingRef.current = false;
+      }
     },
     [
       attachedImages,

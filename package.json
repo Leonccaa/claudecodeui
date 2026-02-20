@@ -30,6 +30,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "verify:gemini-session": "node scripts/verify-gemini-session.js",
     "start": "npm run build && npm run server",
     "release": "./release.sh",
     "postinstall": "node scripts/fix-node-pty.js"
