@@ -539,62 +539,110 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
     window.dispatchEvent(new Event('codeEditorSettingsChanged'));
   }, [codeEditorFontSize]);
 
+  const buildToolSettingsPayload = () => {
+    const timestamp = new Date().toISOString();
+    return {
+      claude: {
+        allowedTools,
+        disallowedTools,
+        skipPermissions,
+        projectSortOrder,
+        lastUpdated: timestamp
+      },
+      cursor: {
+        allowedCommands: cursorAllowedCommands,
+        disallowedCommands: cursorDisallowedCommands,
+        skipPermissions: cursorSkipPermissions,
+        lastUpdated: timestamp
+      },
+      codex: {
+        permissionMode: codexPermissionMode,
+        lastUpdated: timestamp
+      },
+      gemini: {
+        allowedCommands: geminiAllowedCommands,
+        disallowedCommands: geminiDisallowedCommands,
+        skipPermissions: geminiSkipPermissions,
+        lastUpdated: timestamp
+      }
+    };
+  };
+
+  const applyToolSettings = (settings = {}) => {
+    const claude = settings.claude || {};
+    const cursor = settings.cursor || {};
+    const codex = settings.codex || {};
+    const gemini = settings.gemini || {};
+
+    setAllowedTools(claude.allowedTools || []);
+    setDisallowedTools(claude.disallowedTools || []);
+    setSkipPermissions(Boolean(claude.skipPermissions));
+    setProjectSortOrder(claude.projectSortOrder || 'name');
+
+    setCursorAllowedCommands(cursor.allowedCommands || []);
+    setCursorDisallowedCommands(cursor.disallowedCommands || []);
+    setCursorSkipPermissions(Boolean(cursor.skipPermissions));
+
+    setCodexPermissionMode(codex.permissionMode || 'default');
+
+    setGeminiAllowedCommands(gemini.allowedCommands || []);
+    setGeminiDisallowedCommands(gemini.disallowedCommands || []);
+    setGeminiSkipPermissions(Boolean(gemini.skipPermissions));
+  };
+
+  const readToolSettingsFromLocalStorage = () => {
+    const claudeRaw = localStorage.getItem('claude-settings');
+    const cursorRaw = localStorage.getItem('cursor-tools-settings');
+    const codexRaw = localStorage.getItem('codex-settings');
+    const geminiRaw = localStorage.getItem('gemini-settings');
+
+    const claude = claudeRaw ? JSON.parse(claudeRaw) : {};
+    const cursor = cursorRaw ? JSON.parse(cursorRaw) : {};
+    const codex = codexRaw ? JSON.parse(codexRaw) : {};
+    const gemini = geminiRaw ? JSON.parse(geminiRaw) : {
+      skipPermissions: localStorage.getItem('gemini-skip-permissions') === 'true'
+    };
+
+    return { claude, cursor, codex, gemini };
+  };
+
+  const persistToolSettingsToLocalStorage = (settings = {}) => {
+    const claude = settings.claude || {};
+    const cursor = settings.cursor || {};
+    const codex = settings.codex || {};
+    const gemini = settings.gemini || {};
+
+    localStorage.setItem('claude-settings', JSON.stringify(claude));
+    localStorage.setItem('cursor-tools-settings', JSON.stringify(cursor));
+    localStorage.setItem('codex-settings', JSON.stringify(codex));
+    localStorage.setItem('gemini-settings', JSON.stringify(gemini));
+    localStorage.setItem('gemini-skip-permissions', String(Boolean(gemini.skipPermissions)));
+  };
+
   const loadSettings = async () => {
     try {
-      
-      // Load Claude settings from localStorage
-      const savedSettings = localStorage.getItem('claude-settings');
-      
-      if (savedSettings) {
-        const settings = JSON.parse(savedSettings);
-        setAllowedTools(settings.allowedTools || []);
-        setDisallowedTools(settings.disallowedTools || []);
-        setSkipPermissions(settings.skipPermissions || false);
-        setProjectSortOrder(settings.projectSortOrder || 'name');
+      const response = await authenticatedFetch('/api/settings/tool-settings');
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.settings && typeof data.settings === 'object') {
+          applyToolSettings(data.settings);
+          persistToolSettingsToLocalStorage(data.settings);
+        } else {
+          const localSettings = readToolSettingsFromLocalStorage();
+          applyToolSettings(localSettings);
+          try {
+            await authenticatedFetch('/api/settings/tool-settings', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ settings: localSettings })
+            });
+          } catch (syncError) {
+            console.warn('Failed to bootstrap tool settings from localStorage:', syncError);
+          }
+        }
       } else {
-        // Set defaults
-        setAllowedTools([]);
-        setDisallowedTools([]);
-        setSkipPermissions(false);
-        setProjectSortOrder('name');
-      }
-      
-      // Load Cursor settings from localStorage
-      const savedCursorSettings = localStorage.getItem('cursor-tools-settings');
-
-      if (savedCursorSettings) {
-        const cursorSettings = JSON.parse(savedCursorSettings);
-        setCursorAllowedCommands(cursorSettings.allowedCommands || []);
-        setCursorDisallowedCommands(cursorSettings.disallowedCommands || []);
-        setCursorSkipPermissions(cursorSettings.skipPermissions || false);
-      } else {
-        // Set Cursor defaults
-        setCursorAllowedCommands([]);
-        setCursorDisallowedCommands([]);
-        setCursorSkipPermissions(false);
-      }
-
-      // Load Codex settings from localStorage
-      const savedCodexSettings = localStorage.getItem('codex-settings');
-
-      if (savedCodexSettings) {
-        const codexSettings = JSON.parse(savedCodexSettings);
-        setCodexPermissionMode(codexSettings.permissionMode || 'default');
-      } else {
-        setCodexPermissionMode('default');
-      }
-
-      // Load Gemini settings from localStorage
-      const savedGeminiSettings = localStorage.getItem('gemini-settings');
-      if (savedGeminiSettings) {
-        const geminiSettings = JSON.parse(savedGeminiSettings);
-        setGeminiAllowedCommands(geminiSettings.allowedCommands || []);
-        setGeminiDisallowedCommands(geminiSettings.disallowedCommands || []);
-        setGeminiSkipPermissions(Boolean(geminiSettings.skipPermissions));
-      } else {
-        setGeminiAllowedCommands([]);
-        setGeminiDisallowedCommands([]);
-        setGeminiSkipPermissions(localStorage.getItem('gemini-skip-permissions') === 'true');
+        const localSettings = readToolSettingsFromLocalStorage();
+        applyToolSettings(localSettings);
       }
 
       // Load MCP servers from API
@@ -607,13 +655,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
       await fetchCodexMcpServers();
     } catch (error) {
       console.error('Error loading tool settings:', error);
-      setAllowedTools([]);
-      setDisallowedTools([]);
-      setSkipPermissions(false);
-      setProjectSortOrder('name');
-      setGeminiAllowedCommands([]);
-      setGeminiDisallowedCommands([]);
-      setGeminiSkipPermissions(localStorage.getItem('gemini-skip-permissions') === 'true');
+      const localSettings = readToolSettingsFromLocalStorage();
+      applyToolSettings(localSettings);
     }
   };
 
@@ -742,48 +785,22 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
     }
   };
 
-  const saveSettings = () => {
+  const saveSettings = async () => {
     setIsSaving(true);
     setSaveStatus(null);
     
     try {
-      // Save Claude settings
-      const claudeSettings = {
-        allowedTools,
-        disallowedTools,
-        skipPermissions,
-        projectSortOrder,
-        lastUpdated: new Date().toISOString()
-      };
-      
-      // Save Cursor settings
-      const cursorSettings = {
-        allowedCommands: cursorAllowedCommands,
-        disallowedCommands: cursorDisallowedCommands,
-        skipPermissions: cursorSkipPermissions,
-        lastUpdated: new Date().toISOString()
-      };
+      const settingsPayload = buildToolSettingsPayload();
+      persistToolSettingsToLocalStorage(settingsPayload);
 
-      // Save Codex settings
-      const codexSettings = {
-        permissionMode: codexPermissionMode,
-        lastUpdated: new Date().toISOString()
-      };
-
-      // Save Gemini settings
-      const geminiSettings = {
-        allowedCommands: geminiAllowedCommands,
-        disallowedCommands: geminiDisallowedCommands,
-        skipPermissions: geminiSkipPermissions,
-        lastUpdated: new Date().toISOString()
-      };
-
-      // Save to localStorage
-      localStorage.setItem('claude-settings', JSON.stringify(claudeSettings));
-      localStorage.setItem('cursor-tools-settings', JSON.stringify(cursorSettings));
-      localStorage.setItem('codex-settings', JSON.stringify(codexSettings));
-      localStorage.setItem('gemini-settings', JSON.stringify(geminiSettings));
-      localStorage.setItem('gemini-skip-permissions', String(geminiSkipPermissions));
+      const response = await authenticatedFetch('/api/settings/tool-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: settingsPayload })
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to sync settings: ${response.status}`);
+      }
 
       setSaveStatus('success');
       

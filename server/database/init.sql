@@ -50,3 +50,17 @@ CREATE TABLE IF NOT EXISTS user_credentials (
 CREATE INDEX IF NOT EXISTS idx_user_credentials_user_id ON user_credentials(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_credentials_type ON user_credentials(credential_type);
 CREATE INDEX IF NOT EXISTS idx_user_credentials_active ON user_credentials(is_active);
+
+-- User settings table for cross-device synchronized UI settings
+CREATE TABLE IF NOT EXISTS user_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    setting_key TEXT NOT NULL,
+    setting_value TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, setting_key),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_settings_key ON user_settings(setting_key);

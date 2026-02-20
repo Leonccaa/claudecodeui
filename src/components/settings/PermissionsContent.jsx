@@ -178,15 +178,15 @@ function ClaudePermissions({
 
         <div className="space-y-2">
           {allowedTools.map(tool => (
-            <div key={tool} className="flex items-center justify-between bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
-              <span className="font-mono text-sm text-green-800 dark:text-green-200">
+            <div key={tool} className="flex items-start justify-between gap-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
+              <span className="font-mono text-sm text-green-800 dark:text-green-200 break-all flex-1 min-w-0">
                 {tool}
               </span>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => removeAllowedTool(tool)}
-                className="text-green-600 hover:text-green-700"
+                className="text-green-600 hover:text-green-700 shrink-0 ml-1"
               >
                 <X className="w-4 h-4" />
               </Button>
@@ -238,15 +238,15 @@ function ClaudePermissions({
 
         <div className="space-y-2">
           {disallowedTools.map(tool => (
-            <div key={tool} className="flex items-center justify-between bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
-              <span className="font-mono text-sm text-red-800 dark:text-red-200">
+            <div key={tool} className="flex items-start justify-between gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <span className="font-mono text-sm text-red-800 dark:text-red-200 break-all flex-1 min-w-0">
                 {tool}
               </span>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => removeDisallowedTool(tool)}
-                className="text-red-600 hover:text-red-700"
+                className="text-red-600 hover:text-red-700 shrink-0 ml-1"
               >
                 <X className="w-4 h-4" />
               </Button>
@@ -401,15 +401,15 @@ function CursorPermissions({
 
         <div className="space-y-2">
           {allowedCommands.map(cmd => (
-            <div key={cmd} className="flex items-center justify-between bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
-              <span className="font-mono text-sm text-green-800 dark:text-green-200">
+            <div key={cmd} className="flex items-start justify-between gap-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
+              <span className="font-mono text-sm text-green-800 dark:text-green-200 break-all flex-1 min-w-0">
                 {cmd}
               </span>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => removeAllowedCommand(cmd)}
-                className="text-green-600 hover:text-green-700"
+                className="text-green-600 hover:text-green-700 shrink-0 ml-1"
               >
                 <X className="w-4 h-4" />
               </Button>
@@ -461,15 +461,15 @@ function CursorPermissions({
 
         <div className="space-y-2">
           {disallowedCommands.map(cmd => (
-            <div key={cmd} className="flex items-center justify-between bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
-              <span className="font-mono text-sm text-red-800 dark:text-red-200">
+            <div key={cmd} className="flex items-start justify-between gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <span className="font-mono text-sm text-red-800 dark:text-red-200 break-all flex-1 min-w-0">
                 {cmd}
               </span>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => removeDisallowedCommand(cmd)}
-                className="text-red-600 hover:text-red-700"
+                className="text-red-600 hover:text-red-700 shrink-0 ml-1"
               >
                 <X className="w-4 h-4" />
               </Button>
@@ -737,15 +737,15 @@ function GeminiPermissions({
 
         <div className="space-y-2">
           {allowedCommands.map(cmd => (
-            <div key={cmd} className="flex items-center justify-between bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
-              <span className="font-mono text-sm text-green-800 dark:text-green-200">
+            <div key={cmd} className="flex items-start justify-between gap-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
+              <span className="font-mono text-sm text-green-800 dark:text-green-200 break-all flex-1 min-w-0">
                 {cmd}
               </span>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => removeAllowedCommand(cmd)}
-                className="text-green-600 hover:text-green-700"
+                className="text-green-600 hover:text-green-700 shrink-0 ml-1"
               >
                 <X className="w-4 h-4" />
               </Button>
@@ -797,15 +797,15 @@ function GeminiPermissions({
 
         <div className="space-y-2">
           {disallowedCommands.map(cmd => (
-            <div key={cmd} className="flex items-center justify-between bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
-              <span className="font-mono text-sm text-red-800 dark:text-red-200">
+            <div key={cmd} className="flex items-start justify-between gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <span className="font-mono text-sm text-red-800 dark:text-red-200 break-all flex-1 min-w-0">
                 {cmd}
               </span>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => removeDisallowedCommand(cmd)}
-                className="text-red-600 hover:text-red-700"
+                className="text-red-600 hover:text-red-700 shrink-0 ml-1"
               >
                 <X className="w-4 h-4" />
               </Button>

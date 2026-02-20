@@ -1,7 +1,8 @@
 import express from 'express';
-import { apiKeysDb, credentialsDb } from '../database/db.js';
+import { apiKeysDb, credentialsDb, userSettingsDb } from '../database/db.js';
 
 const router = express.Router();
+const TOOL_SETTINGS_KEY = 'tool_settings_v1';
 
 // ===============================
 // API Keys Management
@@ -86,6 +87,38 @@ router.patch('/api-keys/:keyId/toggle', async (req, res) => {
 // ===============================
 // Generic Credentials Management
 // ===============================
+
+router.get('/tool-settings', async (req, res) => {
+  try {
+    const stored = userSettingsDb.getSetting(req.user.id, TOOL_SETTINGS_KEY);
+    res.json({
+      settings: stored?.value || null,
+      updatedAt: stored?.updatedAt || null
+    });
+  } catch (error) {
+    console.error('Error fetching tool settings:', error);
+    res.status(500).json({ error: 'Failed to fetch tool settings' });
+  }
+});
+
+router.put('/tool-settings', async (req, res) => {
+  try {
+    const { settings } = req.body || {};
+    if (!settings || typeof settings !== 'object') {
+      return res.status(400).json({ error: 'settings object is required' });
+    }
+
+    const saved = userSettingsDb.upsertSetting(req.user.id, TOOL_SETTINGS_KEY, settings);
+    res.json({
+      success: true,
+      settings: saved?.value || settings,
+      updatedAt: saved?.updatedAt || null
+    });
+  } catch (error) {
+    console.error('Error saving tool settings:', error);
+    res.status(500).json({ error: 'Failed to save tool settings' });
+  }
+});
 
 // Get all credentials for the authenticated user (optionally filtered by type)
 router.get('/credentials', async (req, res) => {

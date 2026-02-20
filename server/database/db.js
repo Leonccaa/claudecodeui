@@ -75,6 +75,20 @@ const runMigrations = () => {
       db.exec('ALTER TABLE users ADD COLUMN has_completed_onboarding BOOLEAN DEFAULT 0');
     }
 
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        setting_key TEXT NOT NULL,
+        setting_value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, setting_key),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_settings_key ON user_settings(setting_key);
+    `);
+
     console.log('Database migrations completed successfully');
   } catch (error) {
     console.error('Error running migrations:', error.message);
@@ -332,6 +346,38 @@ const credentialsDb = {
   }
 };
 
+const userSettingsDb = {
+  getSetting: (userId, settingKey) => {
+    try {
+      const row = db
+        .prepare('SELECT setting_value, updated_at FROM user_settings WHERE user_id = ? AND setting_key = ?')
+        .get(userId, settingKey);
+      if (!row) return null;
+      return {
+        value: JSON.parse(row.setting_value),
+        updatedAt: row.updated_at
+      };
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  upsertSetting: (userId, settingKey, value) => {
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO user_settings (user_id, setting_key, setting_value, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, setting_key)
+        DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP
+      `);
+      stmt.run(userId, settingKey, JSON.stringify(value ?? {}));
+      return userSettingsDb.getSetting(userId, settingKey);
+    } catch (err) {
+      throw err;
+    }
+  }
+};
+
 // Backward compatibility - keep old names pointing to new system
 const githubTokensDb = {
   createGithubToken: (userId, tokenName, githubToken, description = null) => {
@@ -356,6 +402,7 @@ export {
   initializeDatabase,
   userDb,
   apiKeysDb,
+  userSettingsDb,
   credentialsDb,
   githubTokensDb // Backward compatibility
 };
