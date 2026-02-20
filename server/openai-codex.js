@@ -36,6 +36,30 @@ function transformCodexEvent(event) {
 
       // Transform based on item type
       switch (item.type) {
+        case 'message': {
+          let textContent = '';
+          const rawContent = item.content;
+          if (Array.isArray(rawContent)) {
+            textContent = rawContent
+              .map((part) => part?.text || '')
+              .filter(Boolean)
+              .join('\n');
+          } else if (typeof rawContent === 'string') {
+            textContent = rawContent;
+          } else if (rawContent && typeof rawContent === 'object') {
+            textContent = String(rawContent.text || '');
+          }
+
+          return {
+            type: 'item',
+            itemType: 'message',
+            message: {
+              role: item.role || 'assistant',
+              content: textContent,
+            },
+          };
+        }
+
         case 'agent_message':
           return {
             type: 'item',

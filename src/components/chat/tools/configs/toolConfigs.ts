@@ -41,6 +41,25 @@ export interface ToolDisplayConfig {
   };
 }
 
+function getReadResultSummary(result: any): string {
+  const content = String(result?.content || '').trim();
+  if (!content) {
+    return 'Read complete';
+  }
+
+  const firstLine = content.split(/\r?\n/).find((line) => line.trim()) || '';
+  const lineCount = content.split(/\r?\n/).length;
+  const preview = firstLine.length > 90 ? `${firstLine.slice(0, 90)}...` : firstLine;
+
+  if (!preview) {
+    return lineCount > 1 ? `Read result (${lineCount} lines)` : 'Read result';
+  }
+
+  return lineCount > 1
+    ? `Read result (${lineCount} lines): ${preview}`
+    : `Read result: ${preview}`;
+}
+
 export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   // ============================================================================
   // COMMAND TOOLS
@@ -116,7 +135,14 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
       }
     },
     result: {
-      hidden: true
+      type: 'collapsible',
+      title: (result) => getReadResultSummary(result),
+      defaultOpen: false,
+      contentType: 'text',
+      getContentProps: (result) => ({
+        content: String(result?.content || ''),
+        format: 'code'
+      })
     }
   },
 
@@ -397,6 +423,30 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
       getContentProps: (result) => ({
         content: String(result?.content || '')
       })
+    }
+  },
+
+  CodexContext: {
+    input: {
+      type: 'collapsible',
+      title: 'Codex session context',
+      defaultOpen: false,
+      contentType: 'text',
+      getContentProps: (input) => ({
+        content:
+          typeof input === 'string'
+            ? input
+            : String(input?.content || input?.text || ''),
+        format: 'code'
+      }),
+      colorScheme: {
+        primary: 'text-gray-700 dark:text-gray-300',
+        border: 'border-gray-400 dark:border-gray-500',
+        icon: 'text-gray-500 dark:text-gray-400'
+      }
+    },
+    result: {
+      hideOnSuccess: true
     }
   },
 

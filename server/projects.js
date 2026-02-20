@@ -1450,6 +1450,15 @@ function normalizeComparablePath(inputPath) {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
+function isCodexSystemContextText(value) {
+  const text = String(value || '');
+  if (!text.trim()) return false;
+  return (
+    /^\s*<environment_context>/i.test(text) ||
+    /^\s*#\s*AGENTS\.md instructions\b/i.test(text)
+  );
+}
+
 async function findCodexJsonlFiles(dir) {
   const files = [];
 
@@ -1585,7 +1594,7 @@ async function parseCodexSessionFile(filePath) {
           // Count messages and extract user messages for summary
           if (entry.type === 'event_msg' && entry.payload?.type === 'user_message') {
             messageCount++;
-            if (entry.payload.message) {
+            if (entry.payload.message && !isCodexSystemContextText(entry.payload.message)) {
               lastUserMessage = entry.payload.message;
             }
           }
@@ -1691,24 +1700,53 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
             }
           }
 
+          // Codex stores real user prompts in event_msg.user_message.
+          // Use this as the single source for user-side messages.
+          if (entry.type === 'event_msg' && entry.payload?.type === 'user_message') {
+            const userText = String(entry.payload?.message || '');
+            if (userText.trim() && !isCodexSystemContextText(userText)) {
+              messages.push({
+                type: 'user',
+                timestamp: entry.timestamp,
+                message: {
+                  role: 'user',
+                  content: userText
+                }
+              });
+            }
+          }
+
           // Extract messages from response_item
           if (entry.type === 'response_item' && entry.payload?.type === 'message') {
             const content = entry.payload.content;
             const role = entry.payload.role || 'assistant';
             const textContent = extractText(content);
 
-            // Skip system context messages (environment_context)
-            if (textContent?.includes('<environment_context>')) {
+            // Surface runtime-injected context as a collapsed Codex-side tool block,
+            // instead of showing it as a user message.
+            if (role === 'user' && isCodexSystemContextText(textContent)) {
+              messages.push({
+                type: 'tool_use',
+                timestamp: entry.timestamp,
+                toolName: 'CodexContext',
+                toolInput: { content: textContent },
+              });
+              continue;
+            }
+
+            // Ignore response_item.role=user here to avoid duplicating user prompts and
+            // to prevent runtime-injected context blocks from appearing as user messages.
+            if (role !== 'assistant') {
               continue;
             }
 
             // Only add if there's actual content
             if (textContent?.trim()) {
               messages.push({
-                type: role === 'user' ? 'user' : 'assistant',
+                type: 'assistant',
                 timestamp: entry.timestamp,
                 message: {
-                  role: role,
+                  role: 'assistant',
                   content: textContent
                 }
               });
@@ -1720,7 +1758,7 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
               ?.map(s => s.text)
               .filter(Boolean)
               .join('\n');
-            if (summaryText?.trim()) {
+            if (summaryText?.trim() && !isCodexSystemContextText(summaryText)) {
               messages.push({
                 type: 'thinking',
                 timestamp: entry.timestamp,

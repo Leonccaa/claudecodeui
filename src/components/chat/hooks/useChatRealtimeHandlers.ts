@@ -133,6 +133,19 @@ const isLikelyGeminiThinkingLine = (line: string): boolean => {
   return GEMINI_THINKING_LINE_PATTERN.test(String(line || '').trim());
 };
 
+const CODEX_SYSTEM_CONTEXT_PATTERNS = [
+  /^<environment_context>/i,
+  /^#\s*AGENTS\.md instructions/i,
+];
+
+const isCodexSystemContextText = (value: unknown): boolean => {
+  const text = String(value || '');
+  if (!text.trim()) {
+    return false;
+  }
+  return CODEX_SYSTEM_CONTEXT_PATTERNS.some((pattern) => pattern.test(text));
+};
+
 const extractGeminiToolResultText = (payload: any): string => {
   if (!payload) {
     return '';
@@ -1242,6 +1255,39 @@ export function useChatRealtimeHandlers({
                     isThinking: true,
                   },
                 ]);
+              }
+              break;
+
+            case 'message':
+              if (codexData.message?.content?.trim()) {
+                const content = decodeHtmlEntities(codexData.message.content);
+                const role = String(codexData.message?.role || '').toLowerCase();
+
+                if (role === 'user' && isCodexSystemContextText(content)) {
+                  setChatMessages((previous) => [
+                    ...previous,
+                    {
+                      type: 'assistant',
+                      content: '',
+                      timestamp: new Date(),
+                      isToolUse: true,
+                      toolName: 'CodexContext',
+                      toolInput: { content },
+                    },
+                  ]);
+                  break;
+                }
+
+                if (role === 'assistant' && !isCodexSystemContextText(content)) {
+                  setChatMessages((previous) => [
+                    ...previous,
+                    {
+                      type: 'assistant',
+                      content,
+                      timestamp: new Date(),
+                    },
+                  ]);
+                }
               }
               break;
 
