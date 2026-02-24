@@ -4,21 +4,26 @@ import react from '@vitejs/plugin-react'
 export default defineConfig(({ command, mode }) => {
   // Load env file based on `mode` in the current working directory.
   const env = loadEnv(mode, process.cwd(), '')
-  
-  
+
+  const host = env.HOST || '0.0.0.0'
+  // When binding to all interfaces (0.0.0.0), proxy should connect to localhost
+  // Otherwise, proxy to the specific host the backend is bound to
+  const proxyHost = host === '0.0.0.0' ? 'localhost' : host
+  const port = env.PORT || 3001
+
   return {
     plugins: [react()],
     server: {
-      host: true,
+      host,
       port: parseInt(env.VITE_PORT) || 5173,
       proxy: {
-        '/api': `http://0.0.0.0:${env.PORT || 3001}`,
+        '/api': `http://${proxyHost}:${port}`,
         '/ws': {
-          target: `ws://0.0.0.0:${env.PORT || 3001}`,
+          target: `ws://${proxyHost}:${port}`,
           ws: true
         },
         '/shell': {
-          target: `ws://0.0.0.0:${env.PORT || 3001}`,
+          target: `ws://${proxyHost}:${port}`,
           ws: true
         }
       }

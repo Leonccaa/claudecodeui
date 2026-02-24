@@ -462,7 +462,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
         const description = input.description || 'Running task';
         return `Subagent / ${subagentType}: ${description}`;
       },
-      defaultOpen: true,
+      defaultOpen: false,
       contentType: 'markdown',
       getContentProps: (input) => {
         // If only prompt exists (and required fields), show just the prompt
@@ -503,14 +503,8 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     },
     result: {
       type: 'collapsible',
-      title: (result) => {
-        // Check if result has content with type array (agent results often have this structure)
-        if (result && result.content && Array.isArray(result.content)) {
-          return 'Subagent Response';
-        }
-        return 'Subagent Result';
-      },
-      defaultOpen: true,
+      title: 'Subagent result',
+      defaultOpen: false,
       contentType: 'markdown',
       getContentProps: (result) => {
         // Handle agent results which may have complex structure
