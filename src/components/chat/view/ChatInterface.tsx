@@ -169,6 +169,7 @@ function ChatInterface({
     handlePermissionDecision,
     handleGrantToolPermission,
     handleInputFocusChange,
+    isInputFocused,
   } = useChatComposerState({
     selectedProject,
     selectedSession,
@@ -425,6 +426,7 @@ function ChatInterface({
           onTextareaScrollSync={syncInputOverlayScroll}
           onTextareaInput={handleTextareaInput}
           onInputFocusChange={handleInputFocusChange}
+          isInputFocused={isInputFocused}
           placeholder={t('input.placeholder', {
             provider:
               provider === 'cursor'
